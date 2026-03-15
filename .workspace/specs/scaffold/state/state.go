@@ -53,7 +53,11 @@ func Save(dir string, s *ScaffoldState) error {
 }
 
 // NewState creates an initial scaffold state from validated input.
+// Assigns sequential IDs (1-indexed) to each spec.
 func NewState(rounds int, userGuided bool, specs []QueueSpec) *ScaffoldState {
+	for i := range specs {
+		specs[i].ID = i + 1
+	}
 	return &ScaffoldState{
 		EvaluationRounds: rounds,
 		UserGuided:       userGuided,
@@ -81,6 +85,7 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 		next := s.Queue[0]
 		s.Queue = s.Queue[1:]
 		s.CurrentSpec = &ActiveSpec{
+			ID:              next.ID,
 			Name:            next.Name,
 			Domain:          next.Domain,
 			Topic:           next.Topic,
@@ -104,10 +109,10 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 		if verdict != "" {
 			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
 		}
-		if file == "" {
-			return fmt.Errorf("DRAFT state requires --file <path>")
+		if file != "" {
+			// Allow overriding the file path from the queue if needed.
+			s.CurrentSpec.File = file
 		}
-		s.CurrentSpec.File = file
 		s.CurrentSpec.Round = 1
 		s.State = PhaseEvaluate
 
@@ -153,11 +158,14 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 		}
 		// Move current to completed.
 		s.Completed = append(s.Completed, CompletedSpec{
+			ID:          s.CurrentSpec.ID,
 			Name:        s.CurrentSpec.Name,
 			Domain:      s.CurrentSpec.Domain,
 			File:        s.CurrentSpec.File,
 			RoundsTaken: s.CurrentSpec.Round,
+			CommitHash:  s.LastCommitHash,
 		})
+		s.LastCommitHash = ""
 		s.CurrentSpec = nil
 		if len(s.Queue) == 0 {
 			s.State = PhaseDone

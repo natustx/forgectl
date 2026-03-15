@@ -29,6 +29,7 @@ func (p Phase) IsValid() bool {
 
 // QueueSpec is a spec entry in the input queue file.
 type QueueSpec struct {
+	ID              int      `json:"id"`
 	Name            string   `json:"name"`
 	Domain          string   `json:"domain"`
 	Topic           string   `json:"topic"`
@@ -44,6 +45,7 @@ type QueueInput struct {
 
 // ActiveSpec is the spec currently being worked on.
 type ActiveSpec struct {
+	ID              int      `json:"id"`
 	Name            string   `json:"name"`
 	Domain          string   `json:"domain"`
 	Topic           string   `json:"topic"`
@@ -55,18 +57,21 @@ type ActiveSpec struct {
 
 // CompletedSpec is a spec that has been accepted.
 type CompletedSpec struct {
+	ID          int    `json:"id"`
 	Name        string `json:"name"`
 	Domain      string `json:"domain"`
 	File        string `json:"file"`
 	RoundsTaken int    `json:"rounds_taken"`
+	CommitHash  string `json:"commit_hash,omitempty"`
 }
 
 // ScaffoldState is the persistent state written to scaffold-state.json.
 type ScaffoldState struct {
-	EvaluationRounds int            `json:"evaluation_rounds"`
-	UserGuided       bool           `json:"user_guided"`
-	State            Phase          `json:"state"`
-	CurrentSpec      *ActiveSpec    `json:"current_spec"`
-	Queue            []QueueSpec    `json:"queue"`
+	EvaluationRounds int             `json:"evaluation_rounds"`
+	UserGuided       bool            `json:"user_guided"`
+	State            Phase           `json:"state"`
+	CurrentSpec      *ActiveSpec     `json:"current_spec"`
+	Queue            []QueueSpec     `json:"queue"`
 	Completed        []CompletedSpec `json:"completed"`
+	LastCommitHash   string          `json:"last_commit_hash,omitempty"`
 }

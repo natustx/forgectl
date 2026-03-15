@@ -265,14 +265,15 @@ func TestAdvance_VerdictInWrongState(t *testing.T) {
 	}
 }
 
-func TestAdvance_DraftWithoutFile(t *testing.T) {
+func TestAdvance_DraftWithoutFileUsesQueueValue(t *testing.T) {
 	s := NewState(1, false, twoSpecQueue())
 	assertAdvance(t, s, "", "", PhaseSelect)
 	assertAdvance(t, s, "", "", PhaseDraft)
 
-	err := Advance(s, "", "")
-	if err == nil {
-		t.Fatal("expected error for DRAFT without --file")
+	// Advance without --file uses the file from the queue.
+	assertAdvance(t, s, "", "", PhaseEvaluate)
+	if s.CurrentSpec.File != "optimizer/specs/configuration-models.md" {
+		t.Errorf("file: got %q, want queue value", s.CurrentSpec.File)
 	}
 }
 

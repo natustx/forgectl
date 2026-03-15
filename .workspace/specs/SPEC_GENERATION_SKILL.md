@@ -216,6 +216,12 @@ If something is unresolved after discussion with the user, it does not go in the
 ### Split rather than overload
 If a topic is too broad, produce multiple spec files. Each spec should pass the one-sentence test.
 
+### Track upstream spec impacts
+When generating a spec, identify any existing specs that need updates due to new information, integration points, or dependency relationships introduced by the new spec. Note these in the ACCEPT phase so they can be addressed.
+
+### The architect decides
+Do not ask the user clarifying questions during spec generation. Resolve open questions by reading plans carefully and making judgment calls. Document decisions in the spec's edge cases and rationale sections.
+
 ### Specs are technology-aware, not technology-coupled
 Reference technology when it's part of the interface contract. Don't prescribe internal implementation choices.
 

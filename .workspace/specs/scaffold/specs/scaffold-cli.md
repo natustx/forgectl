@@ -63,7 +63,7 @@ No additional fields are permitted.
 |---------|-------|-------------|
 | `init` | `--rounds N` (required), `--from <path>` (required), `--user-guided` (optional, default false) | Initialize state file from a validated queue |
 | `next` | none | Print the current state and what the architect does now |
-| `advance` | `--file <path>` (DRAFT only), `--verdict PASS\|FAIL` (EVALUATE only) | Transition from current state to next |
+| `advance` | `--file <path>` (optional, DRAFT only — overrides queue value), `--verdict PASS\|FAIL` (EVALUATE only), `--message <text>` (required with `--verdict PASS`) | Transition from current state to next |
 | `status` | none | Print full session state: current spec, round, queue, completed |
 
 ### Outputs
@@ -105,8 +105,8 @@ The scaffold exits with a non-zero code on validation failure.
 | `--from` file fails schema validation — wrong type | Error listing the field, expected type, and actual type. Prints full valid schema. Exit code 1. | Type mismatches cause downstream failures if not caught at init |
 | `advance` called with `--file` outside of DRAFT state | Error: "--file is only valid in DRAFT state. Current state: <state>." Exit code 1. | Flag is meaningless outside DRAFT |
 | `advance` called with `--verdict` outside of EVALUATE state | Error: "--verdict is only valid in EVALUATE state. Current state: <state>." Exit code 1. | Flag is meaningless outside EVALUATE |
-| `advance` called in DRAFT without `--file` | Error: "DRAFT state requires --file <path>." Exit code 1. | The spec file path must be recorded |
 | `advance` called in EVALUATE without `--verdict` | Error: "EVALUATE state requires --verdict PASS or --verdict FAIL." Exit code 1. | Verdict determines the transition |
+| `advance` called with `--verdict PASS` without `--message` | Error: "--message is required when --verdict is PASS." Exit code 1. | Accepted specs must be committed with a message |
 | `advance` called when no current spec is active | Error: "No active spec. Run 'next' to see queue status." Exit code 1. | Cannot advance without a spec in progress |
 | `next` or `advance` called before `init` | Error: "No state file found. Run 'scaffold init' first." Exit code 1. | State file must exist |
 | Queue is empty and `advance` is called in ACCEPT | Message: "All specs complete." Exit code 0. | Normal termination |
@@ -180,8 +180,8 @@ The transition depends on the current state:
 | ORIENT | always | SELECT | Pull next item from queue into `current_spec`, set state to SELECT |
 | SELECT | `user_guided` is false | DRAFT | Set state to DRAFT |
 | SELECT | `user_guided` is true | DRAFT | Set state to DRAFT (architect advances after user discussion) |
-| DRAFT | `--file` provided | EVALUATE | Record file path on `current_spec`, set round to 1, set state to EVALUATE |
-| EVALUATE | `--verdict PASS` | ACCEPT | Set state to ACCEPT |
+| DRAFT | always | EVALUATE | If `--file` provided, override file path on `current_spec`; otherwise use file from queue. Set round to 1, set state to EVALUATE |
+| EVALUATE | `--verdict PASS` and `--message` provided | ACCEPT | Auto-commit spec file and state file with the provided message. Record commit hash on state. Set state to ACCEPT |
 | EVALUATE | `--verdict FAIL` and round < `evaluation_rounds` | REFINE | Set state to REFINE |
 | EVALUATE | `--verdict FAIL` and round >= `evaluation_rounds` | ACCEPT | Set state to ACCEPT (max rounds reached; architect presents to user) |
 | REFINE | always | EVALUATE | Increment round, set state to EVALUATE |
@@ -239,7 +239,9 @@ The `scaffold-state.json` file has this structure:
   "evaluation_rounds": 3,
   "user_guided": true,
   "state": "EVALUATE",
+  "last_commit_hash": "",
   "current_spec": {
+    "id": 2,
     "name": "Repository Loading",
     "domain": "optimizer",
     "topic": "The optimizer clones or locates a repository...",
@@ -251,10 +253,12 @@ The `scaffold-state.json` file has this structure:
   "queue": [],
   "completed": [
     {
+      "id": 1,
       "name": "Configuration Models",
       "domain": "optimizer",
       "file": "optimizer/specs/configuration-models.md",
-      "rounds_taken": 1
+      "rounds_taken": 1,
+      "commit_hash": "a1b2c3d"
     }
   ]
 }
@@ -265,11 +269,16 @@ The `scaffold-state.json` file has this structure:
 | `evaluation_rounds` | integer | Set at init, immutable after |
 | `user_guided` | boolean | Set at init, immutable after |
 | `state` | string | One of: ORIENT, SELECT, DRAFT, EVALUATE, REFINE, ACCEPT, DONE |
+| `last_commit_hash` | string | Commit hash from the most recent PASS verdict; carried to completed on ACCEPT |
 | `current_spec` | object or null | The spec currently being worked on |
+| `current_spec.id` | integer | Sequential ID assigned at init (1-indexed) |
 | `current_spec.round` | integer | Current evaluation round (starts at 1 in EVALUATE) |
 | `queue` | array | Specs not yet started, in priority order |
+| `queue[].id` | integer | Sequential ID assigned at init |
 | `completed` | array | Finished specs with metadata |
+| `completed[].id` | integer | Original sequential ID |
 | `completed[].rounds_taken` | integer | How many evaluation rounds the spec went through |
+| `completed[].commit_hash` | string | Git commit hash from the auto-commit on PASS |
 
 ---
 

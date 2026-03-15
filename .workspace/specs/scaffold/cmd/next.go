@@ -29,6 +29,7 @@ func runNext(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "State:   %s\n", s.State)
 
 	if s.CurrentSpec != nil {
+		fmt.Fprintf(out, "ID:      %d\n", s.CurrentSpec.ID)
 		fmt.Fprintf(out, "Spec:    %s\n", s.CurrentSpec.Name)
 		fmt.Fprintf(out, "Domain:  %s\n", s.CurrentSpec.Domain)
 		fmt.Fprintf(out, "File:    %s\n", s.CurrentSpec.File)

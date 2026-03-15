@@ -36,6 +36,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Current spec.
 	if s.CurrentSpec != nil {
 		fmt.Fprintln(out, "=== Current Spec ===")
+		fmt.Fprintf(out, "ID:      %d\n", s.CurrentSpec.ID)
 		fmt.Fprintf(out, "Name:    %s\n", s.CurrentSpec.Name)
 		fmt.Fprintf(out, "Domain:  %s\n", s.CurrentSpec.Domain)
 		fmt.Fprintf(out, "Topic:   %s\n", s.CurrentSpec.Topic)
@@ -60,7 +61,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		for _, domain := range domainOrder {
 			fmt.Fprintf(out, "[%s]\n", domain)
 			for _, q := range grouped[domain] {
-				fmt.Fprintf(out, "  - %s\n", q.Name)
+				fmt.Fprintf(out, "  %d. %s\n", q.ID, q.Name)
 			}
 		}
 		fmt.Fprintln(out)
@@ -70,7 +71,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if len(s.Completed) > 0 {
 		fmt.Fprintln(out, "=== Completed ===")
 		for _, c := range s.Completed {
-			fmt.Fprintf(out, "  ✓ %s (%s) — %d rounds\n", c.Name, c.Domain, c.RoundsTaken)
+			if c.CommitHash != "" {
+				fmt.Fprintf(out, "  ✓ %d. %s (%s) — %d rounds [%s]\n", c.ID, c.Name, c.Domain, c.RoundsTaken, c.CommitHash)
+			} else {
+				fmt.Fprintf(out, "  ✓ %d. %s (%s) — %d rounds\n", c.ID, c.Name, c.Domain, c.RoundsTaken)
+			}
 		}
 		fmt.Fprintln(out)
 	}

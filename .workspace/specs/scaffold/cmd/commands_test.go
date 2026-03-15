@@ -57,6 +57,7 @@ func resetFlags() {
 	initUserGuided = false
 	advanceFile = ""
 	advanceVerdict = ""
+	advanceMessage = ""
 }
 
 // --- Init command ---
@@ -77,7 +78,6 @@ func TestInitCommand_Success(t *testing.T) {
 		t.Errorf("expected '3 evaluation rounds' in output, got: %s", out)
 	}
 
-	// Verify state file was created.
 	if !state.Exists(dir) {
 		t.Error("state file should exist after init")
 	}
@@ -107,11 +107,9 @@ func TestInitCommand_ExistingStateFile(t *testing.T) {
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
 
-	// First init.
 	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
 	resetFlags()
 
-	// Second init should fail.
 	_, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
 	if err == nil {
 		t.Fatal("expected error for existing state file")
@@ -247,7 +245,7 @@ func TestAdvanceCommand_OrientToSelect(t *testing.T) {
 	}
 }
 
-func TestAdvanceCommand_DraftRequiresFile(t *testing.T) {
+func TestAdvanceCommand_DraftUsesQueueFile(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
@@ -258,14 +256,83 @@ func TestAdvanceCommand_DraftRequiresFile(t *testing.T) {
 	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
 	resetFlags()
 
-	// DRAFT without --file should fail.
+	// DRAFT without --file should use the file from the queue.
 	_, err := executeCommand("advance", "--dir", dir)
-	if err == nil {
-		t.Fatal("expected error for DRAFT without --file")
+	if err != nil {
+		t.Fatalf("expected DRAFT to advance without --file, got: %v", err)
+	}
+
+	s, _ := state.Load(dir)
+	if s.CurrentSpec.File != "optimizer/specs/configuration-models.md" {
+		t.Errorf("file: got %q, want queue value", s.CurrentSpec.File)
 	}
 }
 
-func TestAdvanceCommand_FullCycle(t *testing.T) {
+func TestAdvanceCommand_DraftFileOverride(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := writeQueueFile(t, dir, validQueueJSON())
+	resetFlags()
+	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
+	resetFlags()
+
+	// --file overrides the queue value.
+	_, err := executeCommand("advance", "--dir", dir, "--file", "custom/path.md")
+	if err != nil {
+		t.Fatalf("advance failed: %v", err)
+	}
+
+	s, _ := state.Load(dir)
+	if s.CurrentSpec.File != "custom/path.md" {
+		t.Errorf("file: got %q, want custom/path.md", s.CurrentSpec.File)
+	}
+}
+
+func TestAdvanceCommand_PassRequiresMessage(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := writeQueueFile(t, dir, validQueueJSON())
+	resetFlags()
+	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
+	resetFlags()
+	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
+	resetFlags()
+
+	// PASS without --message should fail.
+	_, err := executeCommand("advance", "--dir", dir, "--verdict", "PASS")
+	if err == nil {
+		t.Fatal("expected error for PASS without --message")
+	}
+}
+
+func TestAdvanceCommand_FailDoesNotRequireMessage(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := writeQueueFile(t, dir, validQueueJSON())
+	resetFlags()
+	executeCommand("init", "--dir", dir, "--rounds", "2", "--from", queuePath)
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
+	resetFlags()
+	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
+	resetFlags()
+
+	// FAIL without --message should succeed.
+	_, err := executeCommand("advance", "--dir", dir, "--verdict", "FAIL")
+	if err != nil {
+		t.Fatalf("expected FAIL without --message to succeed, got: %v", err)
+	}
+}
+
+func TestAdvanceCommand_FullCycleWithMessage(t *testing.T) {
+	// This test runs outside a git repo, so the commit will warn but still advance.
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
@@ -283,18 +350,23 @@ func TestAdvanceCommand_FullCycle(t *testing.T) {
 	resetFlags()
 	executeCommand("advance", "--dir", dir, "--file", "optimizer/specs/cm.md")
 
-	// EVALUATE → ACCEPT
+	// EVALUATE → ACCEPT (with message; commit will warn since not a git repo)
 	resetFlags()
-	executeCommand("advance", "--dir", dir, "--verdict", "PASS")
+	out, err := executeCommand("advance", "--dir", dir, "--verdict", "PASS", "--message", "Add config models spec")
+	if err != nil {
+		t.Fatalf("advance failed: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "ACCEPT") {
+		t.Errorf("expected ACCEPT in output, got: %s", out)
+	}
 
 	// ACCEPT → ORIENT (second spec in queue)
 	resetFlags()
-	out, _ := executeCommand("advance", "--dir", dir)
+	out, _ = executeCommand("advance", "--dir", dir)
 	if !strings.Contains(out, "ORIENT") {
 		t.Errorf("expected back to ORIENT, got: %s", out)
 	}
 
-	// Verify state.
 	s, _ := state.Load(dir)
 	if len(s.Completed) != 1 {
 		t.Errorf("completed: got %d, want 1", len(s.Completed))
@@ -334,7 +406,6 @@ func TestStatusCommand_WithCompleted(t *testing.T) {
 	resetFlags()
 	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
 
-	// Complete first spec.
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
 	resetFlags()
@@ -342,7 +413,7 @@ func TestStatusCommand_WithCompleted(t *testing.T) {
 	resetFlags()
 	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
 	resetFlags()
-	executeCommand("advance", "--dir", dir, "--verdict", "PASS") // EVALUATE → ACCEPT
+	executeCommand("advance", "--dir", dir, "--verdict", "PASS", "--message", "test commit") // EVALUATE → ACCEPT
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // ACCEPT → ORIENT
 	resetFlags()
