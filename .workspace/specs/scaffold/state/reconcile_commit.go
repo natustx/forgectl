@@ -49,7 +49,23 @@ func ReconcileCommit(s *ScaffoldState, workDir string, hash string) ([]string, e
 		}
 	}
 
-	if len(updated) == 0 {
+	// Also register to the reconcile state if it exists.
+	reconcileUpdated := false
+	if s.Reconcile != nil {
+		alreadyHas := false
+		for _, h := range s.Reconcile.CommitHashes {
+			if h == hash {
+				alreadyHas = true
+				break
+			}
+		}
+		if !alreadyHas {
+			s.Reconcile.CommitHashes = append(s.Reconcile.CommitHashes, hash)
+			reconcileUpdated = true
+		}
+	}
+
+	if len(updated) == 0 && !reconcileUpdated {
 		// Check if the commit touched spec files but they already had the hash.
 		for i := range s.Completed {
 			if changedFiles[s.Completed[i].File] {
@@ -57,6 +73,10 @@ func ReconcileCommit(s *ScaffoldState, workDir string, hash string) ([]string, e
 			}
 		}
 		return nil, fmt.Errorf("commit %s did not touch any completed spec files", hash)
+	}
+
+	if reconcileUpdated {
+		updated = append(updated, "(reconcile)")
 	}
 
 	return updated, nil

@@ -87,8 +87,9 @@ type CompletedSpec struct {
 
 // ReconcileState tracks the reconciliation phase after all specs are done.
 type ReconcileState struct {
-	Round int          `json:"round"`
-	Evals []EvalRecord `json:"evals,omitempty"`
+	Round        int          `json:"round"`
+	Evals        []EvalRecord `json:"evals,omitempty"`
+	CommitHashes []string     `json:"commit_hashes,omitempty"`
 }
 
 // ScaffoldState is the persistent state written to scaffold-state.json.

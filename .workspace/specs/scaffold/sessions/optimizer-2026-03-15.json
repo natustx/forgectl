@@ -112,6 +112,9 @@
         "round": 2,
         "verdict": "PASS"
       }
+    ],
+    "commit_hashes": [
+      "8743b1d"
     ]
   }
 }
