@@ -94,5 +94,23 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(out)
 	}
 
+	if s.Reconcile != nil {
+		fmt.Fprintln(out, "=== Reconciliation ===")
+		fmt.Fprintf(out, "Round:   %d\n", s.Reconcile.Round)
+		if len(s.Reconcile.Evals) > 0 {
+			for _, e := range s.Reconcile.Evals {
+				fmt.Fprintf(out, "  Round %d: %s", e.Round, e.Verdict)
+				if len(e.Deficiencies) > 0 {
+					fmt.Fprintf(out, " — %v", e.Deficiencies)
+				}
+				if e.Fixed != "" {
+					fmt.Fprintf(out, " → Fixed: %s", e.Fixed)
+				}
+				fmt.Fprintln(out)
+			}
+		}
+		fmt.Fprintln(out)
+	}
+
 	return nil
 }

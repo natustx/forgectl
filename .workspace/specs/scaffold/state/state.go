@@ -207,7 +207,65 @@ func Advance(s *ScaffoldState, in AdvanceInput) error {
 		}
 
 	case PhaseDone:
-		return fmt.Errorf("all specs complete. Nothing to advance")
+		// DONE → RECONCILE: all individual specs done, start cross-reference pass.
+		if err := rejectFlags(s.State, in); err != nil {
+			return err
+		}
+		s.Reconcile = &ReconcileState{Round: 0}
+		s.State = PhaseReconcile
+
+	case PhaseReconcile:
+		// Architect has fixed cross-references and staged files.
+		// Advance to RECONCILE_EVAL.
+		if err := rejectFlags(s.State, in); err != nil {
+			return err
+		}
+		s.Reconcile.Round++
+		s.State = PhaseReconcileEval
+
+	case PhaseReconcileEval:
+		// Sub-agent evaluates the staged diff.
+		if in.File != "" {
+			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
+		}
+		if in.Verdict == "" {
+			return fmt.Errorf("RECONCILE_EVAL requires --verdict PASS or --verdict FAIL")
+		}
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("invalid verdict: %q. Use PASS or FAIL", in.Verdict)
+		}
+
+		eval := EvalRecord{
+			Round:        s.Reconcile.Round,
+			Verdict:      in.Verdict,
+			Deficiencies: in.Deficiencies,
+		}
+		s.Reconcile.Evals = append(s.Reconcile.Evals, eval)
+
+		if in.Verdict == "PASS" {
+			s.State = PhaseComplete
+		} else {
+			s.State = PhaseReconcileReview
+		}
+
+	case PhaseReconcileReview:
+		if in.File != "" {
+			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
+		}
+		// Record what was fixed on the last eval.
+		if in.Fixed != "" && len(s.Reconcile.Evals) > 0 {
+			s.Reconcile.Evals[len(s.Reconcile.Evals)-1].Fixed = in.Fixed
+		}
+		if in.Verdict == "FAIL" {
+			// Grant another reconcile round.
+			s.State = PhaseReconcile
+		} else {
+			// Accept reconciliation as-is.
+			s.State = PhaseComplete
+		}
+
+	case PhaseComplete:
+		return fmt.Errorf("session complete. Nothing to advance")
 
 	default:
 		return fmt.Errorf("unknown state: %s", s.State)
@@ -275,7 +333,23 @@ func ActionDescription(s *ScaffoldState) string {
 	case PhaseAccept:
 		return "Spec finalized. Advance to move to next spec or complete session."
 	case PhaseDone:
-		return "All specs complete."
+		return "All individual specs complete. Advance to begin cross-reference reconciliation."
+	case PhaseReconcile:
+		return "Fix cross-references across all specs (Depends On, Integration Points). Stage files with git add, then advance."
+	case PhaseReconcileEval:
+		return "Spawn Opus sub-agent to evaluate staged diff. The sub-agent runs 'git diff --staged' to review all reconciliation changes."
+	case PhaseReconcileReview:
+		desc := "Review reconciliation eval results."
+		if s.Reconcile != nil && len(s.Reconcile.Evals) > 0 {
+			last := s.Reconcile.Evals[len(s.Reconcile.Evals)-1]
+			if len(last.Deficiencies) > 0 {
+				desc += fmt.Sprintf(" Deficiencies: %v.", last.Deficiencies)
+			}
+		}
+		desc += " Advance to accept, or --verdict FAIL (with --fixed) to do another pass."
+		return desc
+	case PhaseComplete:
+		return "Session complete. All specs reconciled."
 	default:
 		return "Unknown state."
 	}

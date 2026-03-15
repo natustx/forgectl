@@ -4,25 +4,33 @@ package state
 type Phase string
 
 const (
-	PhaseOrient   Phase = "ORIENT"
-	PhaseSelect   Phase = "SELECT"
-	PhaseDraft    Phase = "DRAFT"
-	PhaseEvaluate Phase = "EVALUATE"
-	PhaseRefine   Phase = "REFINE"
-	PhaseReview   Phase = "REVIEW"
-	PhaseAccept   Phase = "ACCEPT"
-	PhaseDone     Phase = "DONE"
+	PhaseOrient         Phase = "ORIENT"
+	PhaseSelect         Phase = "SELECT"
+	PhaseDraft          Phase = "DRAFT"
+	PhaseEvaluate       Phase = "EVALUATE"
+	PhaseRefine         Phase = "REFINE"
+	PhaseReview         Phase = "REVIEW"
+	PhaseAccept         Phase = "ACCEPT"
+	PhaseDone           Phase = "DONE"
+	PhaseReconcile      Phase = "RECONCILE"
+	PhaseReconcileEval  Phase = "RECONCILE_EVAL"
+	PhaseReconcileReview Phase = "RECONCILE_REVIEW"
+	PhaseComplete       Phase = "COMPLETE"
 )
 
 var validPhases = map[Phase]bool{
-	PhaseOrient:   true,
-	PhaseSelect:   true,
-	PhaseDraft:    true,
-	PhaseEvaluate: true,
-	PhaseRefine:   true,
-	PhaseReview:   true,
-	PhaseAccept:   true,
-	PhaseDone:     true,
+	PhaseOrient:          true,
+	PhaseSelect:          true,
+	PhaseDraft:           true,
+	PhaseEvaluate:        true,
+	PhaseRefine:          true,
+	PhaseReview:          true,
+	PhaseAccept:          true,
+	PhaseDone:            true,
+	PhaseReconcile:       true,
+	PhaseReconcileEval:   true,
+	PhaseReconcileReview: true,
+	PhaseComplete:        true,
 }
 
 func (p Phase) IsValid() bool {
@@ -77,16 +85,23 @@ type CompletedSpec struct {
 	Evals       []EvalRecord `json:"evals,omitempty"`
 }
 
+// ReconcileState tracks the reconciliation phase after all specs are done.
+type ReconcileState struct {
+	Round int          `json:"round"`
+	Evals []EvalRecord `json:"evals,omitempty"`
+}
+
 // ScaffoldState is the persistent state written to scaffold-state.json.
 type ScaffoldState struct {
-	MinRounds      int             `json:"min_rounds"`
-	MaxRounds      int             `json:"max_rounds"`
-	UserGuided     bool            `json:"user_guided"`
-	State          Phase           `json:"state"`
-	CurrentSpec    *ActiveSpec     `json:"current_spec"`
-	Queue          []QueueSpec     `json:"queue"`
-	Completed      []CompletedSpec `json:"completed"`
-	LastCommitHash string          `json:"last_commit_hash,omitempty"`
+	MinRounds      int              `json:"min_rounds"`
+	MaxRounds      int              `json:"max_rounds"`
+	UserGuided     bool             `json:"user_guided"`
+	State          Phase            `json:"state"`
+	CurrentSpec    *ActiveSpec      `json:"current_spec"`
+	Queue          []QueueSpec      `json:"queue"`
+	Completed      []CompletedSpec  `json:"completed"`
+	Reconcile      *ReconcileState  `json:"reconcile,omitempty"`
+	LastCommitHash string           `json:"last_commit_hash,omitempty"`
 }
 
 // EvaluationRounds returns MaxRounds for backward compatibility.

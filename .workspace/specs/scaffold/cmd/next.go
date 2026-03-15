@@ -44,6 +44,10 @@ func runNext(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if s.Reconcile != nil && (s.State == state.PhaseReconcileEval || s.State == state.PhaseReconcileReview) {
+		fmt.Fprintf(out, "Reconcile round: %d\n", s.Reconcile.Round)
+	}
+
 	fmt.Fprintf(out, "Action:  %s\n", state.ActionDescription(s))
 
 	return nil

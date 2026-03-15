@@ -68,7 +68,12 @@ INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → REVIEW → ACCE
 - **EVALUATE**: Spawn Opus sub-agent evaluator. Record `--verdict` and `--deficiencies`.
 - **REFINE**: Fix deficiencies. Record what was fixed with `--fixed`. Advance back to EVALUATE.
 - **REVIEW**: Max rounds reached (or past min rounds). Human decides: accept or `--verdict FAIL` for extra round.
-- **ACCEPT**: Spec finalized. Next spec loops to ORIENT. Empty queue ends session.
+- **ACCEPT**: Spec finalized. Next spec loops to ORIENT. Empty queue → DONE.
+- **DONE**: All individual specs complete. Advance to begin reconciliation.
+- **RECONCILE**: Fix cross-references across all specs. Stage files. Advance.
+- **RECONCILE_EVAL**: Sub-agent evaluates `git diff --staged` for cross-spec consistency.
+- **RECONCILE_REVIEW**: Human reviews eval. Accept or grant another pass.
+- **COMPLETE**: Session fully done.
 
 ### Queue Input File
 

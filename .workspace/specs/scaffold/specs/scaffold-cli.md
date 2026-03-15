@@ -365,6 +365,98 @@ The scaffold does not read or write these files. This is a convention for the ar
 
 ---
 
+---
+
+## Reconciliation Phase
+
+After all individual specs are completed (DONE), the scaffold enters a reconciliation phase that cross-validates dependencies and integration points across all specs.
+
+### State Flow
+
+```
+DONE → RECONCILE → RECONCILE_EVAL → RECONCILE_REVIEW → COMPLETE
+                        ↑                    │
+                        └────────────────────┘ (another pass)
+```
+
+### States
+
+| State | Action |
+|-------|--------|
+| DONE | All individual specs complete. Advance to begin reconciliation. |
+| RECONCILE | Architect fixes cross-references across all specs: verifies Depends On entries have corresponding Integration Points, verifies symmetry (if A mentions B, B mentions A), fixes naming consistency. Architect stages all changed files with `git add`. Advance when ready. |
+| RECONCILE_EVAL | Architect tells the sub-agent to run `git diff --staged` to see all reconciliation changes in a single view. Sub-agent evaluates consistency across all specs. Record `--verdict`. |
+| RECONCILE_REVIEW | Eval returned FAIL. Human decides: accept (`advance`) or fix and re-evaluate (`advance --verdict FAIL --fixed <description>`). |
+| COMPLETE | Session fully complete. All specs reconciled. |
+
+### Reconcile Evaluation Sub-Agent
+
+The reconciliation eval differs from per-spec evals. The sub-agent:
+1. Runs `git diff --staged` to see all changes
+2. Reads all completed spec files
+3. Checks:
+   - Every `Depends On` reference points to a spec that exists
+   - Every dependency has a corresponding `Integration Points` entry in the target spec
+   - Integration Points are symmetric (if A lists B, B lists A)
+   - Spec names are consistent across all references
+   - No circular dependencies exist
+
+### Transition Table Additions
+
+| From State | Condition | To State | Side Effects |
+|------------|-----------|----------|-------------|
+| DONE | always | RECONCILE | Initialize `reconcile` state with round 0 |
+| RECONCILE | always | RECONCILE_EVAL | Increment reconcile round |
+| RECONCILE_EVAL | `--verdict PASS` | COMPLETE | Record eval |
+| RECONCILE_EVAL | `--verdict FAIL` | RECONCILE_REVIEW | Record eval with deficiencies |
+| RECONCILE_REVIEW | no verdict or `--verdict PASS` | COMPLETE | Accept |
+| RECONCILE_REVIEW | `--verdict FAIL` | RECONCILE | Grant another pass, record `--fixed` |
+| COMPLETE | — | Error: nothing to advance | Terminal |
+
+### State File Additions
+
+```json
+{
+  "reconcile": {
+    "round": 2,
+    "evals": [
+      { "round": 1, "verdict": "FAIL", "deficiencies": ["Missing reverse references"], "fixed": "Added reverse refs to all specs" },
+      { "round": 2, "verdict": "PASS" }
+    ]
+  }
+}
+```
+
+### Testing Criteria (Reconciliation)
+
+#### Reconcile flow PASS
+- **Given:** All specs complete (DONE state)
+- **When:** DONE → RECONCILE → RECONCILE_EVAL with `--verdict PASS`
+- **Then:** State is COMPLETE.
+
+#### Reconcile flow FAIL then fix
+- **Given:** RECONCILE_EVAL returns FAIL
+- **When:** RECONCILE_REVIEW grants another round → RECONCILE → RECONCILE_EVAL with PASS
+- **Then:** State is COMPLETE. Two eval records.
+
+#### Reconcile review accept without fix
+- **Given:** RECONCILE_EVAL returns FAIL, state is RECONCILE_REVIEW
+- **When:** `advance` (no verdict)
+- **Then:** State is COMPLETE.
+
+#### COMPLETE cannot advance
+- **Given:** State is COMPLETE
+- **When:** `advance` is called
+- **Then:** Error: "session complete."
+
+#### RECONCILE_EVAL requires verdict
+- **Given:** State is RECONCILE_EVAL
+- **When:** `advance` without `--verdict`
+- **Then:** Error.
+
+---
+
 ## Implements
 - Scaffold state machine design from spec generation skill process
 - Eval tracking proposals: deficiency recording, fix tracking, REVIEW state, min/max rounds, eval output convention
+- Reconciliation phase: cross-reference validation across all completed specs

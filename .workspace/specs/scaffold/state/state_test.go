@@ -335,7 +335,7 @@ func TestAdvance_InvalidVerdict(t *testing.T) {
 	}
 }
 
-func TestAdvance_DoneCannotAdvance(t *testing.T) {
+func TestAdvance_DoneGoesToReconcile(t *testing.T) {
 	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
 	assertAdvance(t, s, adv("", ""), PhaseSelect)
 	assertAdvance(t, s, adv("", ""), PhaseDraft)
@@ -343,10 +343,8 @@ func TestAdvance_DoneCannotAdvance(t *testing.T) {
 	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
 	assertAdvance(t, s, adv("", ""), PhaseDone)
 
-	err := Advance(s, adv("", ""))
-	if err == nil {
-		t.Fatal("expected error advancing past DONE")
-	}
+	// DONE now advances to RECONCILE
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
 }
 
 func TestAdvance_VerdictInRefine(t *testing.T) {
@@ -434,6 +432,115 @@ func TestActionDescription_ReviewShowsDeficiencies(t *testing.T) {
 	}
 	if !containsSubstring(desc, "another round") {
 		t.Errorf("review description should mention option for another round, got: %s", desc)
+	}
+}
+
+// --- Reconciliation ---
+
+func TestReconcileFlow_Pass(t *testing.T) {
+	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
+
+	// Complete the spec.
+	assertAdvance(t, s, adv("", ""), PhaseSelect)
+	assertAdvance(t, s, adv("", ""), PhaseDraft)
+	assertAdvance(t, s, adv("", ""), PhaseEvaluate)
+	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
+	assertAdvance(t, s, adv("", ""), PhaseDone)
+
+	// DONE → RECONCILE
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
+	if s.Reconcile == nil {
+		t.Fatal("reconcile state should be initialized")
+	}
+
+	// RECONCILE → RECONCILE_EVAL
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+	if s.Reconcile.Round != 1 {
+		t.Errorf("reconcile round: got %d, want 1", s.Reconcile.Round)
+	}
+
+	// RECONCILE_EVAL(PASS) → COMPLETE
+	assertAdvance(t, s, adv("", "PASS"), PhaseComplete)
+}
+
+func TestReconcileFlow_FailThenFix(t *testing.T) {
+	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
+
+	assertAdvance(t, s, adv("", ""), PhaseSelect)
+	assertAdvance(t, s, adv("", ""), PhaseDraft)
+	assertAdvance(t, s, adv("", ""), PhaseEvaluate)
+	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
+	assertAdvance(t, s, adv("", ""), PhaseDone)
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+
+	// FAIL → RECONCILE_REVIEW
+	assertAdvance(t, s, advWithDef("FAIL", []string{"Missing reverse references"}), PhaseReconcileReview)
+
+	// Grant another round → RECONCILE
+	assertAdvance(t, s, AdvanceInput{Verdict: "FAIL", Fixed: "Added reverse refs"}, PhaseReconcile)
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+
+	if s.Reconcile.Round != 2 {
+		t.Errorf("reconcile round: got %d, want 2", s.Reconcile.Round)
+	}
+
+	// PASS this time → COMPLETE
+	assertAdvance(t, s, adv("", "PASS"), PhaseComplete)
+
+	if len(s.Reconcile.Evals) != 2 {
+		t.Fatalf("reconcile evals: got %d, want 2", len(s.Reconcile.Evals))
+	}
+}
+
+func TestReconcileReview_Accept(t *testing.T) {
+	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
+
+	assertAdvance(t, s, adv("", ""), PhaseSelect)
+	assertAdvance(t, s, adv("", ""), PhaseDraft)
+	assertAdvance(t, s, adv("", ""), PhaseEvaluate)
+	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
+	assertAdvance(t, s, adv("", ""), PhaseDone)
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+	assertAdvance(t, s, adv("", "FAIL"), PhaseReconcileReview)
+
+	// Accept from review without fixing
+	assertAdvance(t, s, adv("", ""), PhaseComplete)
+}
+
+func TestComplete_CannotAdvance(t *testing.T) {
+	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
+
+	assertAdvance(t, s, adv("", ""), PhaseSelect)
+	assertAdvance(t, s, adv("", ""), PhaseDraft)
+	assertAdvance(t, s, adv("", ""), PhaseEvaluate)
+	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
+	assertAdvance(t, s, adv("", ""), PhaseDone)
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+	assertAdvance(t, s, adv("", "PASS"), PhaseComplete)
+
+	err := Advance(s, adv("", ""))
+	if err == nil {
+		t.Fatal("expected error advancing past COMPLETE")
+	}
+}
+
+func TestReconcileEval_RequiresVerdict(t *testing.T) {
+	s := NewState(1, 1, false, []QueueSpec{twoSpecQueue()[0]})
+
+	assertAdvance(t, s, adv("", ""), PhaseSelect)
+	assertAdvance(t, s, adv("", ""), PhaseDraft)
+	assertAdvance(t, s, adv("", ""), PhaseEvaluate)
+	assertAdvance(t, s, adv("", "PASS"), PhaseAccept)
+	assertAdvance(t, s, adv("", ""), PhaseDone)
+	assertAdvance(t, s, adv("", ""), PhaseReconcile)
+	assertAdvance(t, s, adv("", ""), PhaseReconcileEval)
+
+	err := Advance(s, adv("", ""))
+	if err == nil {
+		t.Fatal("expected error for RECONCILE_EVAL without verdict")
 	}
 }
 
