@@ -49,8 +49,11 @@ scaffold advance --fixed "Added Observability section"             # REFINE: rec
 scaffold advance                                                   # REVIEW: accept
 scaffold advance --verdict FAIL                                    # REVIEW: grant extra round
 
-# Add a commit to a completed spec
+# Add a commit to a completed spec by ID
 scaffold add-commit --id 5 --hash "7cede10"
+
+# Auto-register a commit to all specs it touched (reconciliation, shared fixes)
+scaffold reconcile-commit --hash "8743b1d"
 
 # Full session overview
 scaffold status
