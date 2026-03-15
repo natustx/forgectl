@@ -76,13 +76,13 @@ type ActiveSpec struct {
 
 // CompletedSpec is a spec that has been accepted.
 type CompletedSpec struct {
-	ID          int          `json:"id"`
-	Name        string       `json:"name"`
-	Domain      string       `json:"domain"`
-	File        string       `json:"file"`
-	RoundsTaken int          `json:"rounds_taken"`
-	CommitHash  string       `json:"commit_hash,omitempty"`
-	Evals       []EvalRecord `json:"evals,omitempty"`
+	ID           int          `json:"id"`
+	Name         string       `json:"name"`
+	Domain       string       `json:"domain"`
+	File         string       `json:"file"`
+	RoundsTaken  int          `json:"rounds_taken"`
+	CommitHashes []string     `json:"commit_hashes"`
+	Evals        []EvalRecord `json:"evals,omitempty"`
 }
 
 // ReconcileState tracks the reconciliation phase after all specs are done.

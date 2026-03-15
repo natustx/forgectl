@@ -98,6 +98,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 			} else {
 				s.LastCommitHash = hash
 				fmt.Fprintf(out, "Committed: %s\n", hash)
+				// Also add to current spec's future completed entry via LastCommitHash.
 			}
 		}
 	}

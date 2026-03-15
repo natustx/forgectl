@@ -81,8 +81,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(out, "=== Completed ===")
 		for _, c := range s.Completed {
 			rounds := fmt.Sprintf("%d rounds", c.RoundsTaken)
-			if c.CommitHash != "" {
-				rounds += fmt.Sprintf(" [%s]", c.CommitHash)
+			if len(c.CommitHashes) > 0 {
+				rounds += fmt.Sprintf(" %v", c.CommitHashes)
 			}
 			verdict := "PASS"
 			if len(c.Evals) > 0 {

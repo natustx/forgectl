@@ -189,14 +189,18 @@ func Advance(s *ScaffoldState, in AdvanceInput) error {
 		if s.CurrentSpec == nil {
 			return fmt.Errorf("no active spec. Run 'next' to see queue status")
 		}
+		hashes := []string{}
+		if s.LastCommitHash != "" {
+			hashes = append(hashes, s.LastCommitHash)
+		}
 		s.Completed = append(s.Completed, CompletedSpec{
-			ID:          s.CurrentSpec.ID,
-			Name:        s.CurrentSpec.Name,
-			Domain:      s.CurrentSpec.Domain,
-			File:        s.CurrentSpec.File,
-			RoundsTaken: s.CurrentSpec.Round,
-			CommitHash:  s.LastCommitHash,
-			Evals:       s.CurrentSpec.Evals,
+			ID:           s.CurrentSpec.ID,
+			Name:         s.CurrentSpec.Name,
+			Domain:       s.CurrentSpec.Domain,
+			File:         s.CurrentSpec.File,
+			RoundsTaken:  s.CurrentSpec.Round,
+			CommitHashes: hashes,
+			Evals:        s.CurrentSpec.Evals,
 		})
 		s.LastCommitHash = ""
 		s.CurrentSpec = nil
