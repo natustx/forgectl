@@ -68,6 +68,8 @@ No additional fields are permitted.
 | `next` | none | Print the current state and what the architect does now |
 | `advance` | `--file <path>` (optional, DRAFT only), `--verdict PASS\|FAIL` (EVALUATE or REVIEW), `--message <text>` (required with PASS in EVALUATE), `--deficiencies <csv>` (with FAIL in EVALUATE), `--fixed <text>` (in REFINE) | Transition from current state to next |
 | `status` | none | Print full session state: current spec, eval history, queue, completed |
+| `add-commit` | `--id N` (required), `--hash <hash>` (required) | Add a commit hash to a specific completed spec. Hash is validated against git. Duplicates are rejected. |
+| `reconcile-commit` | `--hash <hash>` (required) | Auto-register a commit to all completed specs whose files were touched. Runs `git show --name-only` to match files. Hash validated. Deduplicates. |
 
 ### Outputs
 
@@ -112,6 +114,43 @@ The scaffold exits with a non-zero code on validation failure.
 | `advance` called in EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
 | `advance` called with `--verdict PASS` in EVALUATE without `--message` | Error. Exit code 1. | Accepted specs must be committed |
 | `next` or `advance` called before `init` | Error. Exit code 1. | State file must exist |
+| `add-commit` or `reconcile-commit` with a hash that does not exist in git | Error: "commit does not exist in the repository." Exit code 1. | Prevents registering invalid hashes |
+| `add-commit` with a hash already registered to the target spec | Error: "commit already registered." Exit code 1. | Prevents duplicates |
+| `add-commit` targeting an active (not completed) spec | Error: "spec is still active." Exit code 1. | Commits are registered to completed specs only |
+
+---
+
+## Behavior
+
+### Commit Hash Validation
+
+All commands that accept a commit hash (`add-commit`, `reconcile-commit`, and the auto-commit in `advance --verdict PASS`) validate that the hash exists in git using `git cat-file -t`. The object type must be `commit`. Non-existent hashes, tags, blobs, and tree objects are rejected.
+
+### Registering Commits to Specs
+
+#### add-commit
+Appends a commit hash to a specific completed spec by ID. The hash is validated against git and checked for duplicates before appending.
+
+#### reconcile-commit
+Runs `git show --name-only <hash>` to determine which files were changed, then matches file paths against `completed[].file`. The hash is appended to every matching spec that doesn't already have it. Reports which specs were updated.
+
+---
+
+## Session Archiving
+
+Completed session state files are archived to a permanent directory:
+
+```
+.workspace/specs/scaffold/sessions/
+├── optimizer-2026-03-15.json
+├── api-2026-03-17.json
+└── ...
+```
+
+- The active `scaffold-state.json` is gitignored (ephemeral working state).
+- Archived sessions in `sessions/` are committed to git (permanent audit trail).
+- Naming convention: `<domain>-<date>.json`.
+- Archive before starting a new session. The active state file must be deleted (or the scaffold will reject `init`).
 
 ---
 
