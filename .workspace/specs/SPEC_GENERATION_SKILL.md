@@ -89,17 +89,29 @@ The architect generates this JSON before `init`. The scaffold validates it stric
 
 When the scaffold reaches the EVALUATE state, spawn an Opus sub-agent using the Agent tool. The sub-agent receives a structured prompt with file references, not inline content.
 
+### Sub-Agent Framing
+
+The evaluator is an **adversarial reviewer**, not a rubber stamp. Its job is to find deficiencies. A spec that passes all 10 dimensions on the first round is unusual and should be verified thoroughly before a blanket PASS is issued.
+
+Key principles:
+- **Evidence over assertion.** Every verdict — PASS or FAIL — must cite specific sections, behaviors, or models from the spec and planning sources. "PASS — —" is not a valid output.
+- **Read before judging.** The agent must summarize what it read from each document before evaluating. This proves comprehension and prevents skimming.
+- **Completeness is a checklist, not a vibe.** The agent must enumerate every behavior/model from the planning sources and check each one against the spec.
+- **Silence is a finding.** If the spec is missing an entire section that SPEC_FORMAT.md defines (e.g., Observability), that's a format compliance failure even if the planning docs don't mention it — the agent must flag whether the omission is justified.
+
 ### Sub-Agent Prompt Format
 
 ```markdown
 # Spec Evaluation
 
-You are an independent specification reviewer. Your job is to evaluate a draft
-spec against the project's specification standards.
+You are an adversarial specification reviewer. Your job is to find deficiencies
+in a draft spec. You are not here to validate — you are here to stress-test.
+A blanket PASS across all dimensions on the first round is unusual. Verify
+thoroughly before concluding that nothing needs work.
 
 ## Reference Documents
 
-Read these files before evaluating:
+Read these files completely before evaluating:
 
 - **Spec format and principles:** `.workspace/specs/SPEC_FORMAT.md`
 - **Generation skill (constraints and anti-patterns):** `.workspace/specs/SPEC_GENERATION_SKILL.md`
@@ -118,47 +130,89 @@ excluded?
 - `<path-to-planning-file-2>`
 - ...
 
-## Evaluation Rubric
+---
 
-Evaluate the spec across these dimensions. For each dimension, assign a verdict
-of PASS or FAIL. If FAIL, provide a specific, actionable deficiency.
+## Step 1: Document Summary (REQUIRED)
+
+Before evaluating, summarize what you read. This proves comprehension and
+prevents skimming. For each document:
+
+### Planning Source: `<filename>`
+- Key models/behaviors defined: [list them]
+- Key constraints/rules: [list them]
+
+### Spec Under Review: `<filename>`
+- Topic of concern: [quote it]
+- Models defined: [list them]
+- Behaviors defined: [list them]
+- Number of testing criteria: [count]
+- Number of edge cases: [count]
+- Number of invariants: [count]
+
+---
+
+## Step 2: Completeness Checklist (REQUIRED)
+
+Enumerate every model, behavior, constraint, and rule from the planning
+sources. For each one, state whether it is:
+- **Covered** — present in the spec (cite the section)
+- **Excluded** — not in the spec, with rationale given
+- **Missing** — not in the spec, no rationale given (this is a deficiency)
+- **Out of scope** — belongs to a different spec's topic of concern
+
+Use a table:
+
+| Item from Planning | Status | Spec Section (if covered) | Notes |
+|--------------------|--------|---------------------------|-------|
+| [model/behavior]   | Covered/Excluded/Missing/Out of scope | [section] | [notes] |
+
+---
+
+## Step 3: Dimension Evaluation
+
+Evaluate the spec across these dimensions. For each dimension, assign PASS
+or FAIL. **Every dimension requires a justification of 2-4 sentences citing
+specific evidence from the spec, even on PASS.** A bare "—" is not acceptable.
 
 | Dimension | What to check |
 |-----------|---------------|
-| **Completeness** | Every behavior in the planning sources is covered in the spec or explicitly excluded with rationale. No silent omissions. |
-| **Testability** | Every behavior, invariant, and edge case has a corresponding testing criterion with Given/When/Then. If a contract exists without a test, it fails this dimension. |
-| **Precision** | No vague language: "appropriately", "as needed", "handled", "properly", "correctly". Every qualifier resolves to a concrete condition. |
-| **Voice** | Declarative throughout. No "should", "could", "might", "would". The spec states what the system *does*, not what it *should do*. |
-| **Error Exhaustiveness** | Every step in every behavior that can fail has a named failure mode and a named response. Silence means the step cannot fail — verify this is true. |
-| **Topic Focus** | The topic of concern passes the one-sentence test. No scope creep into adjacent topics. |
-| **Format Compliance** | Follows the structure in SPEC_FORMAT.md. Sections are in the correct order. Required sections are present. |
-| **No Plan Leakage** | No references to planning file paths, planning directory structure, or planning document names as file references. The `Implements` section may name topics but not file locations. |
-| **Edge Case Coverage** | Boundary conditions, unusual inputs, empty states, and race conditions are addressed. Each has scenario, expected behavior, and rationale. |
-| **Invariant Correctness** | Invariants are always-true properties, not postconditions of specific operations. They hold regardless of operation order. |
+| **Completeness** | Every behavior in the planning sources is covered in the spec or explicitly excluded with rationale. No silent omissions. Use your checklist from Step 2. |
+| **Testability** | Every behavior, invariant, and edge case has a corresponding testing criterion with Given/When/Then. Count them: behaviors without tests are a FAIL. |
+| **Precision** | No vague language: "appropriately", "as needed", "handled", "properly", "correctly". Every qualifier resolves to a concrete condition. Quote any vague phrases you find. |
+| **Voice** | Declarative throughout. No "should", "could", "might", "would". The spec states what the system *does*, not what it *should do*. Quote any violations. |
+| **Error Exhaustiveness** | Every step in every behavior that can fail has a named failure mode and a named response. Silence means the step cannot fail — verify this is actually true for each silent step. |
+| **Topic Focus** | The topic of concern passes the one-sentence test. No scope creep into adjacent topics. Name any sections that drift. |
+| **Format Compliance** | Follows the structure in SPEC_FORMAT.md. Sections are in the correct order. Required sections are present. If a section from SPEC_FORMAT.md is absent (e.g., Observability, Configuration), state whether the omission is justified for this topic. |
+| **No Plan Leakage** | No references to planning file paths, planning directory structure, or planning document names as file references. The `Implements` section may name topics but not file locations. Quote any violations. |
+| **Edge Case Coverage** | Boundary conditions, unusual inputs, empty states, and race conditions are addressed. Each has scenario, expected behavior, and rationale. Identify any boundary conditions from the planning sources that are missing. |
+| **Invariant Correctness** | Invariants are always-true properties, not postconditions of specific operations. They hold regardless of operation order. For each invariant, verify it cannot be temporarily violated. |
 
-## Output Format
+---
+
+## Step 4: Output
 
 Return your evaluation in this exact structure:
 
 ### Verdict: [PASS | FAIL]
 
 ### Round Summary
-One sentence: what is the overall quality and what (if anything) needs work.
+2-3 sentences: what is the strongest aspect of this spec, what is the weakest,
+and what (if anything) blocks acceptance.
 
 ### Dimension Results
 
-| Dimension | Verdict | Deficiency (if FAIL) |
-|-----------|---------|----------------------|
-| Completeness | PASS/FAIL | [specific issue or "—"] |
-| Testability | PASS/FAIL | [specific issue or "—"] |
-| Precision | PASS/FAIL | [specific issue or "—"] |
-| Voice | PASS/FAIL | [specific issue or "—"] |
-| Error Exhaustiveness | PASS/FAIL | [specific issue or "—"] |
-| Topic Focus | PASS/FAIL | [specific issue or "—"] |
-| Format Compliance | PASS/FAIL | [specific issue or "—"] |
-| No Plan Leakage | PASS/FAIL | [specific issue or "—"] |
-| Edge Case Coverage | PASS/FAIL | [specific issue or "—"] |
-| Invariant Correctness | PASS/FAIL | [specific issue or "—"] |
+| Dimension | Verdict | Evidence |
+|-----------|---------|----------|
+| Completeness | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Testability | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Precision | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Voice | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Error Exhaustiveness | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Topic Focus | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Format Compliance | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| No Plan Leakage | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Edge Case Coverage | PASS/FAIL | [2-4 sentence justification citing specific sections] |
+| Invariant Correctness | PASS/FAIL | [2-4 sentence justification citing specific sections] |
 
 ### Deficiency Details
 
@@ -167,10 +221,16 @@ For each FAIL dimension, provide:
 #### [Dimension Name]
 - **Issue:** What specifically is wrong.
 - **Location:** Which section or behavior in the spec.
+- **Evidence:** Quote the problematic text or name the missing item.
 - **Fix:** What the architect should do to resolve it.
 
-Do not suggest improvements beyond the rubric. Do not rewrite the spec.
-Your job is to evaluate, not to author.
+### Observations
+
+Optional: note anything that is technically passing but borderline, or patterns
+you noticed that the architect should be aware of for future specs. This section
+is advisory — it does not affect the verdict.
+
+Do not rewrite the spec. Your job is to evaluate, not to author.
 ```
 
 ### Sub-Agent Configuration
