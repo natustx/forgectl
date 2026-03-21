@@ -10,7 +10,7 @@ import (
 var dir string
 
 var rootCmd = &cobra.Command{
-	Use:   "impl-scaffold",
+	Use:   "planctl",
 	Short: "Implementation plan lifecycle manager",
 }
 

@@ -1,6 +1,6 @@
 package main
 
-import "impl-scaffold/cmd"
+import "planctl/cmd"
 
 func main() {
 	cmd.Execute()

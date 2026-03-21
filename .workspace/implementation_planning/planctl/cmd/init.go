@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"impl-scaffold/state"
+	"planctl/state"
 
 	"github.com/spf13/cobra"
 )

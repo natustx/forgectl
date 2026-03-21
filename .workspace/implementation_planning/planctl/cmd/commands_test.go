@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"impl-scaffold/state"
+	"planctl/state"
 )
 
 func validQueueJSON() string {

@@ -1,4 +1,4 @@
-module impl-scaffold
+module planctl
 
 go 1.21.6
 
