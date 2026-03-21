@@ -1,6 +1,6 @@
 # Scaffold Changes
 
-> Notes on how the planning scaffold (planctl) should change based on the launcher planning session.
+> Notes on how the planning scaffold (planctl) should change based on the launcher planning session and subsequent design review.
 
 ## What changed
 
@@ -16,84 +16,83 @@ The DRAFT phase now produces a `plan.json` + `notes/` directory instead of an `I
 ```
 <domain>/.workspace/implementation_plan/
 ├── plan.json
-└── notes/
-    ├── <package>.md
+├── notes/
+│   ├── <package>.md
+│   └── ...
+└── evals/
+    ├── round-1.md
     └── ...
 ```
 
 ## Format definition
 
-See `.workspace/implementation_planning/PLAN_FORMAT.md` for the full JSON schema, item structure, test structure, notes file conventions, and examples.
+See `.workspace/implementation_planning/planctl/PLAN_FORMAT.md` for the full JSON schema, item structure, test structure, notes file conventions, and examples.
 
 ## Reference files
 
 | File | Purpose |
 |------|---------|
-| `.workspace/implementation_planning/PLAN_FORMAT.md` | JSON schema and conventions for plan.json |
+| `.workspace/implementation_planning/planctl/PLAN_FORMAT.md` | JSON schema and conventions for plan.json |
+| `.workspace/implementation_planning/planctl/EVALUATOR_PROMPT.md` | Full instructions for the evaluation sub-agent |
 | `launcher/.workspace/implementation_plan/plan.json` | First plan generated in this format |
 | `launcher/.workspace/implementation_plan/notes/` | Reference notes files (config, daemon, launch, stop, cli) |
 
-## What the scaffold needs to change
+## Summary of scaffold changes
 
-1. **DRAFT state output:** The `--file` flag and `File` field in the queue currently point to a single markdown file. Should point to a directory or a JSON file instead.
+### State machine
 
-2. **EVALUATE state:** The evaluator needs to understand the JSON format. See "Evaluator sub-agent" section below for the full prompt structure.
+- **SELECT → REVIEW**: Renamed. Lightweight checkpoint showing plan format path.
+- **New: Validation gate**: Automatic structural validation of plan.json fires after DRAFT and after REFINE. If valid, transitions directly to EVALUATE (VALIDATE state is never visible). If invalid, enters VALIDATE loop until fixed.
+- **Full flow**: ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT → [validate] → EVALUATE ⇄ REFINE → [validate] → EVALUATE ... → ACCEPT → DONE
 
-3. **Study phase notes should feed into plan generation.** The scaffold records study notes (specs, code, packages) — these should inform the plan's `context` block and `refs` list.
+### Flags simplified
 
-4. **Queue schema may need a `format` field** to distinguish markdown plans from JSON plans, if both formats need to coexist.
+| Removed | Reason |
+|---------|--------|
+| `--file` | Queue provides plan.json path. No override needed. |
+| `--notes` | Study phase findings are ephemeral. Not stored in state. |
+| `--message` | Scaffold doesn't do git operations. |
+| `--deficiencies` | Deficiencies live in the eval report file, not CLI flags. |
+| `--fixed` | The plan diff is the fix. Eval report documents what was wrong. |
+| `--sub-agents` | Hardcoded to 3. |
+| `--user-guided` | Every phase is already manual. |
 
-5. **Notes generation is a sub-step of DRAFT.** The scaffold doesn't currently track whether notes files have been created. This could be a validation check before advancing from DRAFT to EVALUATE.
+| Added | Purpose |
+|-------|---------|
+| `--eval-report <path>` | EVALUATE only. Stores path to eval report file. Scaffold verifies file exists. |
 
-6. **Evaluation reports written to disk.** The evaluator should write its report to `<domain>/.workspace/implementation_plan/evals/round-N.md`. This provides an audit trail that travels with the plan and allows REFINE agents to read exact deficiencies.
+Only EVALUATE takes flags (`--verdict`, `--eval-report`). All other phases advance with bare `planctl advance`.
+
+### State file simplified
+
+| Removed | Reason |
+|---------|--------|
+| `sub_agents` | Hardcoded |
+| `user_guided` | Removed |
+| `study` (on ActivePlan/CompletedPlan) | Study notes no longer stored in state |
+| `commit_hash` (on CompletedPlan) | Scaffold doesn't do git |
+| `evals[].deficiencies` | In eval report file |
+| `evals[].fixed` | In plan diff |
+
+| Added | Reason |
+|-------|--------|
+| `evals[].eval_report` | Path to evaluation report file |
+
+### Action description changes
+
+Each phase now outputs relevant reference file paths:
+- **STUDY_CODE**: "Explore the codebase in relation to the specs under study"
+- **REVIEW**: Shows `planctl/PLAN_FORMAT.md` path only. No study notes.
+- **DRAFT**: Shows plan.json path, notes dir, `planctl/PLAN_FORMAT.md` path.
+- **EVALUATE**: Shows plan path, `planctl/EVALUATOR_PROMPT.md` path, report target path.
+- **REFINE**: Shows eval report path from previous round.
+- **VALIDATE** (on failure): Shows validation errors with field descriptions from PLAN_FORMAT.md.
 
 ---
 
 ## Evaluator sub-agent
 
-### Prompt structure
-
-The evaluator is a sub-agent that reads the plan and specs, writes its report to `evals/round-N.md`, and returns a verdict. It does NOT modify the plan — only the eval report file.
-
-The evaluator must check **every section** of every spec — not just Testing Criteria. Round 1 of the launcher evaluation only checked Testing Criteria, Invariants, and Edge Cases. Round 2 added Behavior, Error Handling, Rejection, Interface, Configuration, Observability, and Integration Points — and found 5 deficiencies that round 1 missed.
-
-### Files the evaluator reads
-
-1. The plan: `<domain>/.workspace/implementation_plan/plan.json`
-2. All specs listed in the plan's `refs` array
-3. The format definition: `.workspace/implementation_planning/PLAN_FORMAT.md`
-
-### Evaluation dimensions
-
-The evaluator checks ALL of the following. For each, it reads the spec section line by line.
-
-| # | Dimension | Spec section | What to check |
-|---|-----------|-------------|---------------|
-| 1 | Behavior | §Behavior (Preconditions, Steps, Postconditions) | Every step has a corresponding plan item or test |
-| 2 | Error Handling | §Error Handling tables within Behavior sections | Every failure row has a corresponding test |
-| 3 | Rejection | §Rejection table | Every row maps to a test |
-| 4 | Interface | §Interface (Inputs, Outputs) | Plan items produce types/functions matching the spec's interface |
-| 5 | Configuration | §Configuration table | Every parameter (type, default, description) is addressed |
-| 6 | Observability | §Observability/Logging tables | Every logging requirement (level + what) is addressed |
-| 7 | Integration Points | §Integration Points table | Plan dependencies reflect cross-spec relationships |
-| 8 | Invariants | §Invariants | Each invariant has an enforcement mechanism in the plan |
-| 9 | Edge Cases | §Edge Cases | Each edge case has a corresponding test |
-| 10 | Testing Criteria | §Testing Criteria | Every entry has a corresponding test in the plan |
-| 11 | Dependencies & Format | Plan structure | IDs match, DAG is valid, layers respected, format compliant |
-
-### Report format
-
-The evaluator writes its report to `<domain>/.workspace/implementation_plan/evals/round-N.md` with:
-
-- Verdict: PASS or FAIL
-- Per-dimension: PASS or FAIL with specifics
-- For FAIL: list of every deficiency with the spec section and missing coverage
-- Summary: counts of what passed vs total (e.g., "47/49 Testing Criteria covered")
-
-### Verdict rules
-
-- **PASS** only if ALL dimensions pass
-- **FAIL** if ANY dimension has deficiencies
+Moved to standalone file: `.workspace/implementation_planning/planctl/EVALUATOR_PROMPT.md`
 
 ### Lessons from the launcher session
 
