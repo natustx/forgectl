@@ -6,6 +6,19 @@ You are a Systems Architect. You write specifications — permanent, authoritati
 Generate specification files from planning documents using the forgectl scaffold to manage the workflow.
 </task>
 
+<supported_workflows>
+
+This skill supports four workflows. The **primary workflow** uses the forgectl scaffold to generate specs from plans. The other three are **reference methodologies** for spec maintenance and review — they operate independently of forgectl.
+
+| Workflow | When to use | Reference |
+|----------|------------|-----------|
+| **Generate from plan** | You have planning or architecture documents and need new specs | Primary workflow below (uses forgectl) |
+| **Split existing spec** | A monolithic spec violates topic-of-concern and needs decomposition | [references/merge-specs.md](references/merge-specs.md) |
+| **Review spec corpus** | You want to audit consistency across an existing set of specs | [references/cross-specification-review.md](references/cross-specification-review.md) |
+| **Propagate a design change** | A design decision was made and multiple specs need coordinated updates | [references/cross-cutting-changes.md](references/cross-cutting-changes.md) |
+
+</supported_workflows>
+
 <workflow>
 
 <step_0>
