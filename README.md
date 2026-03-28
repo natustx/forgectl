@@ -1,8 +1,12 @@
 # Forgectl
+
 Forgectl is a spec driven development harness. Takes plan to implementation completeness.
+Specs are the source of truth, the new form of code.   Agents take diffs in the specs and generate code from it, just like compilers take C or Golang code and generate assembly.
+Forgectl is a compiler of specs into executable code, built for Agents.
 
 
 ## Workflow
+
 Take a plan and pipe it into your LLM coding agent.
 The agent will then 
 1. crete/update specs according to the changes in the plan
@@ -11,12 +15,14 @@ The agent will then
 
 
 ## Pipelines
+
 - Specify - take a plan and align specs to the plan
 - Implemenation Planning - Plan how to implement the changes in specs to the existing code base.
 - Implement - take an implementation plan, and implement it.
 
 
 ## Future Work
+
 - Reverse Engineer implemenation into Specs for brownfield development repos
 - Front End Implementation Agents
   - using playwright agents
@@ -34,7 +40,21 @@ It will help you tailor plans that have less defects and more accurate and solid
 
 If you updated the specs already, just use this to make a quick implementation.   The idea here is you want to make a quick implementation update, after changing the specs.
 
+### Specs
 
+Use this when you want to
+1. update the specs
+2. have a plan and want to embed into the specifications
+3. want to refactor your specifications
+
+### Implementation Planning
+
+Used to view the diff in specs and generate a plan of implementation. Add your own references and agents to help out with creating notes on implementation details for particular parts of the specs that need to be implemented.
+This pipeline of the process is involved with generating a plan to implement.
+
+### Implement
+
+Take a implementation plan, and implement it. Simple as that.  This is where your agent is on auto pilot, and reinforces the spec generation into the codebase.
 
 
 ## Thanks and References
