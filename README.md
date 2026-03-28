@@ -30,6 +30,12 @@ Use the Planner Skill to plan, this allows you to currently create plans that wi
 It will help you tailor plans that have less defects and more accurate and solid logic.
 - used to table ideas in the `tabled` section of the workspace
 
+### Implement From Specs
+
+If you updated the specs already, just use this to make a quick implementation.   The idea here is you want to make a quick implementation update, after changing the specs.
+
+
+
 
 ## Thanks and References
 - Clayton Farr and Geoffery Huntley for implementation of a spec driven development workflow https://github.com/ClaytonFarr/ralph-playbook for the ralph playbook, and helping me harness AI potential.  https://github.com/ghuntley/how-to-ralph-wiggum .
