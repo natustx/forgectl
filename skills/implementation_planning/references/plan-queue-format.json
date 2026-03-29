@@ -1,0 +1,18 @@
+{
+  "plans": [
+    {
+      "name": "<display name for forgectl status>",
+      "domain": "<domain this plan covers, e.g. api, launcher>",
+      "topic": "<one-sentence description of what this plan addresses>",
+      "file": "<target path for output plan.json, relative to project root>",
+      "specs": [
+        "<spec file path relative to project root>",
+        "<...>"
+      ],
+      "code_search_roots": [
+        "<directory root for codebase exploration>",
+        "<...>"
+      ]
+    }
+  ]
+}
