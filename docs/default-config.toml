@@ -16,6 +16,29 @@ batch = 3
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
+# Sub-agent type for spec batch evaluation.
+agent_type = "opus"
+# Number of sub-agents to spawn for evaluation.
+agent_count = 1
+
+[specifying.cross_reference]
+# Minimum eval rounds for domain cross-reference.
+min_rounds = 1
+# Maximum eval rounds. FAIL at this threshold forces acceptance.
+max_rounds = 2
+# Sub-agent type for cross-referencing domain specs.
+agent_type = "haiku"
+# Number of sub-agents to spawn for cross-referencing.
+agent_count = 3
+# When true, pause for user review after first CROSS_REFERENCE_EVAL.
+# Overrides user_guided — fires even when user_guided is false.
+user_review = false
+
+[specifying.cross_reference.eval]
+# Sub-agent type for evaluating cross-reference work.
+agent_type = "opus"
+# Number of sub-agents to spawn for cross-reference evaluation.
+agent_count = 1
 
 [specifying.reconciliation]
 # Minimum rounds before PASS can complete reconciliation.
@@ -23,6 +46,10 @@ max_rounds = 3
 min_rounds = 0
 # Maximum reconciliation rounds. FAIL at this threshold forces completion.
 max_rounds = 3
+# Sub-agent type for reconciliation evaluation.
+agent_type = "opus"
+# Number of sub-agents to spawn for reconciliation evaluation.
+agent_count = 1
 
 # --- Planning Phase ---
 # Controls implementation plan generation from specs.
@@ -32,11 +59,27 @@ max_rounds = 3
 # TODO: values > 1 are not yet supported. Reserved for future use.
 batch = 1
 
+[planning.study_code]
+# Sub-agent type for codebase exploration.
+agent_type = "haiku"
+# Number of sub-agents to spawn for codebase exploration.
+agent_count = 3
+
 [planning.eval]
 # Minimum eval rounds before PASS can accept a plan.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
+# Sub-agent type for plan evaluation.
+agent_type = "opus"
+# Number of sub-agents to spawn for plan evaluation.
+agent_count = 1
+
+[planning.refine]
+# Sub-agent type for updating plan from eval findings.
+agent_type = "opus"
+# Number of sub-agents to spawn for plan refinement.
+agent_count = 1
 
 # --- Implementing Phase ---
 # Controls batched implementation of plan items.
@@ -51,6 +94,10 @@ batch = 2
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
+# Sub-agent type for implementation evaluation.
+agent_type = "opus"
+# Number of sub-agents to spawn for implementation evaluation.
+agent_count = 1
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.
