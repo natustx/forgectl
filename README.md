@@ -22,6 +22,7 @@ The agent will then
 3. create implementation from the plan
 
 ![Forgectl Spec-Driven Development Pipeline](docs/assets/forgectl-scaffold.png)
+
 *The Forgectl pipeline: transforming plans into specifications, then into implementation plans, and finally into production code through coordinated agent workflows.*
 
 [View the diagram in Excalidraw](https://excalidraw.com/#json=1A-LzC-RZ52muw_EqwSjL,WmZYBR5D_9Y8E6LP6NGl1A)
@@ -68,6 +69,11 @@ This pipeline of the process is involved with generating a plan to implement.
 ### Implement
 
 Take a implementation plan, and implement it. Simple as that.  This is where your agent is on auto pilot, and reinforces the spec generation into the codebase.
+
+
+## Diagrams
+
+Detailed ASCII art diagrams of the full workflow, state machines, CLI commands, and data flow are in [`docs/diagrams/`](docs/diagrams/).
 
 
 ## Thanks and References

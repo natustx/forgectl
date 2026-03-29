@@ -1,0 +1,141 @@
+================================================================================
+              EVALUATION LOOP — Round Enforcement Logic
+================================================================================
+
+  Every phase uses the same evaluation loop pattern with configurable
+  min_rounds and max_rounds to balance quality with progress.
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  GENERIC EVALUATION LOOP
+  ═══════════════════════════════════════════════════════════════════════════
+
+                          ┌──────────────┐
+                          │  WORK DONE   │
+                          │  (Draft /    │
+                          │   Implement) │
+                          └──────┬───────┘
+                                 │
+                                 ▼
+                          ┌──────────────┐
+                     ┌───►│  EVALUATE    │◄──────────────────────┐
+                     │    │              │                        │
+                     │    │  rounds++    │                        │
+                     │    └──────┬───────┘                        │
+                     │           │                                │
+                     │    ┌──────┴──────────────────────┐        │
+                     │    │                             │        │
+                     │    ▼                             ▼        │
+                     │  PASS                          FAIL       │
+                     │    │                             │        │
+                     │    │                             │        │
+                     │    ▼                             ▼        │
+                     │  rounds >= min_rounds?     rounds >= max_rounds?
+                     │    │                             │        │
+                     │  ┌─┴──┐                       ┌──┴─┐     │
+                     │  │    │                       │    │     │
+                     │ YES   NO                    YES   NO     │
+                     │  │    │                       │    │     │
+                     │  │    ▼                       │    ▼     │
+                     │  │  REFINE ───────────────────┼────┘     │
+                     │  │  (must meet minimum)       │          │
+                     │  │                            │          │
+                     │  ▼                            ▼          │
+                     │  ACCEPT                    ACCEPT        │
+                     │  (quality met)          (forced — prevent│
+                     │                          infinite loops) │
+                     │                                          │
+                     └──────── REFINE ──────────────────────────┘
+                          (fix deficiencies)
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  DECISION MATRIX
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌───────────┬────────────────────────┬────────────────────────────────────┐
+  │ Verdict   │ Round Condition         │ Outcome                           │
+  ├───────────┼────────────────────────┼────────────────────────────────────┤
+  │ PASS      │ rounds >= min_rounds   │ ACCEPT  (quality satisfied)       │
+  │ PASS      │ rounds <  min_rounds   │ REFINE  (need more eval cycles)   │
+  │ FAIL      │ rounds <  max_rounds   │ REFINE  (fix and retry)           │
+  │ FAIL      │ rounds >= max_rounds   │ ACCEPT  (forced — cap reached)    │
+  └───────────┴────────────────────────┴────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  EXAMPLES BY CONFIGURATION
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Example 1: --min-rounds 1 --max-rounds 3  (typical)
+  ─────────────────────────────────────────────────────
+
+    Round 1: EVALUATE ──► PASS ──► ACCEPT (done in 1 round)
+    Round 1: EVALUATE ──► FAIL ──► REFINE
+    Round 2: EVALUATE ──► PASS ──► ACCEPT (fixed in round 2)
+    Round 2: EVALUATE ──► FAIL ──► REFINE
+    Round 3: EVALUATE ──► FAIL ──► ACCEPT (forced at max)
+
+
+  Example 2: --min-rounds 2 --max-rounds 3  (high quality)
+  ─────────────────────────────────────────────────────────
+
+    Round 1: EVALUATE ──► PASS ──► REFINE (below min, must continue)
+    Round 2: EVALUATE ──► PASS ──► ACCEPT (met minimum)
+    Round 1: EVALUATE ──► FAIL ──► REFINE
+    Round 2: EVALUATE ──► FAIL ──► REFINE
+    Round 3: EVALUATE ──► FAIL ──► ACCEPT (forced at max)
+
+
+  Example 3: --min-rounds 1 --max-rounds 1  (fast, single pass)
+  ─────────────────────────────────────────────────────────────
+
+    Round 1: EVALUATE ──► PASS ──► ACCEPT
+    Round 1: EVALUATE ──► FAIL ──► ACCEPT (forced, no retry)
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  11 EVALUATION DIMENSIONS  (used in both planning and specifying)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌────┬──────────────────────┬────────────────────────────────────────────┐
+  │  # │ Dimension             │ What the evaluator checks                 │
+  ├────┼──────────────────────┼────────────────────────────────────────────┤
+  │  1 │ Behavior              │ All spec behaviors covered by plan items  │
+  │  2 │ Error Handling        │ Failure modes mapped to tests             │
+  │  3 │ Rejection             │ Invalid inputs tested                     │
+  │  4 │ Interface             │ Outputs match spec contracts              │
+  │  5 │ Configuration         │ Configurable params covered               │
+  │  6 │ Observability         │ Logging requirements addressed            │
+  │  7 │ Integration Points    │ Cross-spec dependencies mapped            │
+  │  8 │ Invariants            │ Always-true properties enforced           │
+  │  9 │ Edge Cases            │ Boundary conditions tested                │
+  │ 10 │ Testing Criteria      │ All tests mapped to plan items            │
+  │ 11 │ Dependencies & Format │ DAG valid, schema compliant               │
+  └────┴──────────────────────┴────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  IMPLEMENTATION EVALUATION  (7 criteria — different from above)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌────┬──────────────────────┬────────────────────────────────────────────┐
+  │  # │ Criterion             │ What the evaluator checks                 │
+  ├────┼──────────────────────┼────────────────────────────────────────────┤
+  │  1 │ Completeness          │ All steps implemented, all files present  │
+  │  2 │ Correctness           │ Implementation matches spec contract      │
+  │  3 │ Test Coverage         │ Each acceptance criterion satisfied       │
+  │  4 │ Rejection Handling    │ Invalid inputs rejected as specified      │
+  │  5 │ Edge Cases            │ Boundary conditions handled               │
+  │  6 │ Code Quality          │ Clean, idiomatic, maintainable            │
+  │  7 │ Integration           │ Works correctly with dependencies         │
+  └────┴──────────────────────┴────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  EVAL REPORT LOCATIONS
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Specifying:    <project>/specs/.eval/<spec-name>-rN.md
+  Planning:      <domain>/.workspace/implementation_plan/evals/round-N.md
+  Implementing:  <domain>/.workspace/implementation_plan/evals/batch-N-round-M.md

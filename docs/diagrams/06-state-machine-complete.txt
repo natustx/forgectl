@@ -1,0 +1,155 @@
+================================================================================
+              FORGECTL — Complete State Machine (All 19 States)
+================================================================================
+
+  3 Phases x Multiple States = 19 Total States
+  State file: forge.json (JSON-backed, atomic writes)
+
+
+  SPECIFYING PHASE (14 transitions)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ORIENT ──────► SELECT ──────► DRAFT ──────► EVALUATE
+    ▲                                            │
+    │                                     ┌──────┴──────┐
+    │                                     │             │
+    │                               PASS>=min      FAIL<max
+    │                               or FAIL>=max   or PASS<min
+    │                                     │             │
+    │                                     ▼             ▼
+    │                                  ACCEPT        REFINE
+    │                                     │             │
+    │                            ┌────────┘             │
+    │                            │                      │
+    │                    queue    │  queue               └──► EVALUATE
+    │                    empty    │  has more
+    │                            │
+    │                            ▼
+    └──── (more specs) ──── ORIENT
+                                 │
+                            queue empty
+                                 │
+                                 ▼
+                               DONE
+                                 │
+                                 ▼
+                            RECONCILE ──────► RECONCILE_EVAL
+                                                    │
+                                             ┌──────┴──────┐
+                                             │             │
+                                           PASS          FAIL
+                                             │             │
+                                             ▼             ▼
+                                      RECONCILE_REVIEW  RECONCILE_REVIEW
+                                             │             │
+                                         accept         FAIL
+                                             │             │
+                                             ▼             └──► RECONCILE
+                                          COMPLETE
+                                             │
+                                             ▼
+                                        PHASE_SHIFT
+                                    (needs --from flag)
+
+
+  PLANNING PHASE (13 transitions)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ORIENT ──► STUDY_SPECS ──► STUDY_CODE ──► STUDY_PACKAGES ──► REVIEW
+                                                                  │
+                                                                  ▼
+                                                                DRAFT
+                                                                  │
+                                                         ┌────────┴────────┐
+                                                    plan valid        plan invalid
+                                                         │                 │
+                                                         ▼                 ▼
+                                                     EVALUATE          VALIDATE
+                                                         │                 │
+                                                  ┌──────┴──────┐    fix + advance
+                                                  │             │         │
+                                            PASS>=min      FAIL<max      │
+                                            or FAIL>=max   or PASS<min   │
+                                                  │             │         │
+                                                  ▼             ▼         │
+                                               ACCEPT        REFINE ◄────┘
+                                                  │             │
+                                                  │             └──► EVALUATE
+                                                  │                  or VALIDATE
+                                                  ▼
+                                             PHASE_SHIFT
+                                         (auto, no --from)
+                                                  │
+                                          Mutates plan.json:
+                                          adds passes + rounds
+
+
+  IMPLEMENTING PHASE (8 transitions)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ORIENT ──────► IMPLEMENT ──────► IMPLEMENT ──────► EVALUATE
+    ▲             (item 1)          (item N)            │
+    │                                            ┌──────┴──────┐
+    │                                            │             │
+    │                                      PASS>=min      FAIL<max
+    │                                      or FAIL>=max   or PASS<min
+    │                                            │             │
+    │                                            ▼             ▼
+    │                                         COMMIT       IMPLEMENT
+    │                                            │         (round 2+)
+    │                                            │             │
+    │                                     ┌──────┴──────┐     │
+    │                                     │             │     └──► EVALUATE
+    │                                more batches   all done
+    │                                     │             │
+    └─────────────────────────────────────┘             ▼
+                                                      DONE
+
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  LEGEND
+  ═══════════════════════════════════════════════════════════════════════════
+
+  State Categories:
+
+  ┌────────────────────┬──────────────────────────────────────────────────┐
+  │ Category           │ States                                          │
+  ├────────────────────┼──────────────────────────────────────────────────┤
+  │ Orientation        │ ORIENT                                          │
+  │ Selection          │ SELECT                                          │
+  │ Research           │ STUDY_SPECS, STUDY_CODE, STUDY_PACKAGES, REVIEW │
+  │ Creation           │ DRAFT                                           │
+  │ Validation         │ VALIDATE                                        │
+  │ Evaluation         │ EVALUATE, RECONCILE_EVAL                        │
+  │ Iteration          │ REFINE, RECONCILE, RECONCILE_REVIEW             │
+  │ Execution          │ IMPLEMENT                                       │
+  │ Acceptance         │ ACCEPT, COMMIT                                  │
+  │ Terminal           │ DONE, COMPLETE                                  │
+  │ Transition         │ PHASE_SHIFT                                     │
+  └────────────────────┴──────────────────────────────────────────────────┘
+
+  Phase availability:
+
+  ┌──────────────┬──────────────────────────────────────────────────────┐
+  │ State         │ Specifying    Planning    Implementing              │
+  ├──────────────┼──────────────────────────────────────────────────────┤
+  │ ORIENT        │     x            x            x                     │
+  │ SELECT        │     x                                               │
+  │ DRAFT         │     x            x                                  │
+  │ EVALUATE      │     x            x            x                     │
+  │ REFINE        │     x            x                                  │
+  │ ACCEPT        │     x            x                                  │
+  │ DONE          │     x                         x                     │
+  │ RECONCILE     │     x                                               │
+  │ RECONCILE_*   │     x                                               │
+  │ COMPLETE      │     x                                               │
+  │ PHASE_SHIFT   │     x            x                                  │
+  │ STUDY_SPECS   │                  x                                  │
+  │ STUDY_CODE    │                  x                                  │
+  │ STUDY_PKGS    │                  x                                  │
+  │ REVIEW        │                  x                                  │
+  │ VALIDATE      │                  x                                  │
+  │ IMPLEMENT     │                               x                     │
+  │ COMMIT        │                               x                     │
+  └──────────────┴──────────────────────────────────────────────────────┘

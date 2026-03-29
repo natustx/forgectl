@@ -1,0 +1,175 @@
+================================================================================
+              PHASE 1: SPECIFYING — Detailed State Machine
+================================================================================
+
+  Role: Systems Architect
+  Input: spec-queue.json (list of specs to draft)
+  Output: specs/*.md (permanent behavioral contracts)
+  Evaluator: 11-dimension adversarial review by AI sub-agent
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  INITIALIZATION                                                         │
+  │                                                                         │
+  │  forgectl init \                                                        │
+  │    --phase specifying \                                                 │
+  │    --from spec-queue.json \                                             │
+  │    --batch-size 1 \                                                     │
+  │    --max-rounds 3 --min-rounds 1 \                                     │
+  │    --guided                                                             │
+  └────────────────────────────────┬────────────────────────────────────────┘
+                                   │
+                                   ▼
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║  PER-SPEC LOOP  (repeats for each spec in queue)             ║
+  ╠═══════════════════════════════════════════════════════════════╣
+  ║                                                               ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  ORIENT                                          │         ║
+  ║  │                                                  │         ║
+  ║  │  - Read planning sources referenced by spec      │         ║
+  ║  │  - Review existing specs in project              │         ║
+  ║  │  - Understand domain landscape                   │         ║
+  ║  │  - If guided: discuss scope with user             │         ║
+  ║  │                                                  │         ║
+  ║  │  Action: forgectl advance                        │         ║
+  ║  └──────────────────────┬──────────────────────────┘         ║
+  ║                         ▼                                     ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  SELECT                                          │         ║
+  ║  │                                                  │         ║
+  ║  │  - Pull next spec from queue                     │         ║
+  ║  │  - Display: name, domain, topic, file path       │         ║
+  ║  │  - Display: planning sources & dependencies      │         ║
+  ║  │                                                  │         ║
+  ║  │  Action: forgectl advance                        │         ║
+  ║  └──────────────────────┬──────────────────────────┘         ║
+  ║                         ▼                                     ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  DRAFT                                           │         ║
+  ║  │                                                  │         ║
+  ║  │  Write spec file following spec-format.md:       │         ║
+  ║  │                                                  │         ║
+  ║  │  ┌─────────────────────────────────────┐        │         ║
+  ║  │  │ # Title                              │        │         ║
+  ║  │  │ ## Topic of Concern                  │        │         ║
+  ║  │  │ ## Context                           │        │         ║
+  ║  │  │ ## Depends On                        │        │         ║
+  ║  │  │ ## Integration Points                │        │         ║
+  ║  │  │ ## Interface                         │        │         ║
+  ║  │  │   ### Inputs / Outputs / Rejection   │        │         ║
+  ║  │  │ ## Behavior                          │        │         ║
+  ║  │  │   ### Preconditions / Steps /        │        │         ║
+  ║  │  │       Postconditions / Error Handling│        │         ║
+  ║  │  │ ## Configuration                     │        │         ║
+  ║  │  │ ## Observability                     │        │         ║
+  ║  │  │ ## Invariants                        │        │         ║
+  ║  │  │ ## Edge Cases                        │        │         ║
+  ║  │  │ ## Testing Criteria                  │        │         ║
+  ║  │  │ ## Implements                        │        │         ║
+  ║  │  └─────────────────────────────────────┘        │         ║
+  ║  │                                                  │         ║
+  ║  │  Action: forgectl advance [--file <path>]        │         ║
+  ║  └──────────────────────┬──────────────────────────┘         ║
+  ║                         ▼                                     ║
+  ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐        ║
+  ║  │  EVALUATION LOOP  (min_rounds..max_rounds)       │        ║
+  ║  │                                                   │        ║
+  ║  │  ┌─────────────────────────────────────────┐     │        ║
+  ║  │  │  EVALUATE                                │     │        ║
+  ║  │  │                                          │     │        ║
+  ║  │  │  Spawn Opus sub-agent to review spec     │     │        ║
+  ║  │  │  against 11 dimensions:                  │     │        ║
+  ║  │  │                                          │     │        ║
+  ║  │  │   1. Behavior coverage                   │     │        ║
+  ║  │  │   2. Error handling                      │     │        ║
+  ║  │  │   3. Rejection cases                     │     │        ║
+  ║  │  │   4. Interface (inputs/outputs)          │     │        ║
+  ║  │  │   5. Configuration                       │     │        ║
+  ║  │  │   6. Observability/logging               │     │        ║
+  ║  │  │   7. Integration points                  │     │        ║
+  ║  │  │   8. Invariants                          │     │        ║
+  ║  │  │   9. Edge cases                          │     │        ║
+  ║  │  │  10. Testing criteria                    │     │        ║
+  ║  │  │  11. Dependencies & format               │     │        ║
+  ║  │  │                                          │     │        ║
+  ║  │  │  Output: specs/.eval/<name>-rN.md        │     │        ║
+  ║  │  │                                          │     │        ║
+  ║  │  │  Action: forgectl advance \              │     │        ║
+  ║  │  │    --verdict PASS|FAIL \                 │     │        ║
+  ║  │  │    --eval-report <path>                  │     │        ║
+  ║  │  └─────────────┬──────────┬────────────────┘     │        ║
+  ║  │                │          │                       │        ║
+  ║  │          FAIL  │          │  PASS                 │        ║
+  ║  │        <max    │          │  >=min                │        ║
+  ║  │                ▼          │                       │        ║
+  ║  │  ┌──────────────────┐    │                       │        ║
+  ║  │  │  REFINE           │    │                       │        ║
+  ║  │  │                   │    │                       │        ║
+  ║  │  │  Fix deficiencies │    │                       │        ║
+  ║  │  │  from eval report │    │                       │        ║
+  ║  │  │                   │    │                       │        ║
+  ║  │  │  Action: advance  │    │                       │        ║
+  ║  │  └────────┬─────────┘    │                       │        ║
+  ║  │           │               │                       │        ║
+  ║  │           └───► EVALUATE  │                       │        ║
+  ║  │                           │                       │        ║
+  ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘        ║
+  ║                              ▼                                ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  ACCEPT                                          │         ║
+  ║  │                                                  │         ║
+  ║  │  Spec finalized. Auto-commit.                    │         ║
+  ║  │                                                  │         ║
+  ║  │  Action: forgectl advance --message "<msg>"      │         ║
+  ║  └──────────────────────┬──────────────────────────┘         ║
+  ║                         │                                     ║
+  ║            ┌────────────┴────────────┐                        ║
+  ║            │                         │                        ║
+  ║       more specs              queue empty                     ║
+  ║            │                         │                        ║
+  ║            ▼                         ▼                        ║
+  ║       ► ORIENT                    DONE                        ║
+  ║         (next spec)                  │                        ║
+  ╚══════════════════════════════════════╪════════════════════════╝
+                                         │
+                                         ▼
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║  RECONCILIATION  (cross-spec consistency)                     ║
+  ╠═══════════════════════════════════════════════════════════════╣
+  ║                                                               ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  RECONCILE                                       │         ║
+  ║  │                                                  │         ║
+  ║  │  Cross-validate ALL specs:                       │         ║
+  ║  │  - Depends On refs point to existing specs       │         ║
+  ║  │  - Integration Points are symmetric              │         ║
+  ║  │  - No circular dependencies                      │         ║
+  ║  │  - Naming consistency across all specs            │         ║
+  ║  │                                                  │         ║
+  ║  │  Stage fixes: git add                            │         ║
+  ║  │  Action: forgectl advance                        │         ║
+  ║  └──────────────────────┬──────────────────────────┘         ║
+  ║                         ▼                                     ║
+  ║  ┌─────────────────────────────────────────────────┐         ║
+  ║  │  RECONCILE_EVAL                                  │         ║
+  ║  │                                                  │         ║
+  ║  │  Sub-agent reviews git diff --staged             │         ║
+  ║  │  for cross-spec consistency                      │         ║
+  ║  │                                                  │         ║
+  ║  │  Action: forgectl advance \                      │         ║
+  ║  │    --verdict PASS --message "<msg>"              │         ║
+  ║  │    OR --verdict FAIL                             │         ║
+  ║  └──────────┬───────────────────┬──────────────────┘         ║
+  ║             │                   │                             ║
+  ║        PASS │              FAIL │                             ║
+  ║             ▼                   ▼                             ║
+  ║        RECONCILE_REVIEW    RECONCILE_REVIEW                   ║
+  ║             │                   │                             ║
+  ║         accept              ──► RECONCILE                     ║
+  ║             │               (another pass)                    ║
+  ║             ▼                                                 ║
+  ║        COMPLETE                                               ║
+  ╚════════════╪══════════════════════════════════════════════════╝
+               │
+               ▼
+         PHASE_SHIFT ──► Planning Phase

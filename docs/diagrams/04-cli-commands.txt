@@ -1,0 +1,134 @@
+================================================================================
+                    FORGECTL CLI — Command Reference Map
+================================================================================
+
+  Binary: forgectl (Go, Cobra framework)
+  State:  forge.json (JSON-backed state machine)
+
+
+  forgectl
+  │
+  ├── init ─────────────── Initialize a new session
+  │   │
+  │   │  Required flags:
+  │   │    --from <path>       Input file (spec-queue, plan-queue, or plan.json)
+  │   │    --batch-size <int>  Max items per batch (>= 1)
+  │   │    --max-rounds <int>  Maximum evaluation rounds
+  │   │
+  │   │  Optional flags:
+  │   │    --min-rounds <int>  Minimum eval rounds (default: 1, <= max-rounds)
+  │   │    --phase <string>    Starting phase (default: "specifying")
+  │   │    --guided            Enable guided mode (user checkpoints)
+  │   │    --no-guided         Disable guided mode
+  │   │    --dir <path>        Directory for state file (default: ".")
+  │   │
+  │   │  Input by phase:
+  │   │    specifying   ──►  spec-queue.json
+  │   │    planning     ──►  plan-queue.json
+  │   │    implementing ──►  plan.json
+  │   │
+  │   └─── Output: forge.json (state = ORIENT)
+  │
+  │
+  ├── advance ──────────── Transition to next state
+  │   │
+  │   │  Context-dependent flags:
+  │   │
+  │   │  ┌─────────────────┬─────────────────────────────────────────────┐
+  │   │  │ Current State    │ Valid Flags                                 │
+  │   │  ├─────────────────┼─────────────────────────────────────────────┤
+  │   │  │ ORIENT           │ (none required)                            │
+  │   │  │ SELECT           │ (none required)                            │
+  │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
+  │   │  │ EVALUATE         │ --verdict PASS|FAIL  --eval-report <path>  │
+  │   │  │ REFINE           │ (none required)                            │
+  │   │  │ ACCEPT           │ --message <msg>  (commit message)          │
+  │   │  │ IMPLEMENT        │ --message <msg>  (round 1 only)            │
+  │   │  │ COMMIT           │ --message <msg>  (commit message)          │
+  │   │  │ RECONCILE        │ (none required)                            │
+  │   │  │ RECONCILE_EVAL   │ --verdict PASS|FAIL  --eval-report <path>  │
+  │   │  │ RECONCILE_REVIEW │ --verdict FAIL  (optional, sends back)     │
+  │   │  │ COMPLETE         │ --from <path>  (plan-queue for phase shift)│
+  │   │  │ PHASE_SHIFT      │ --from <path>  (if specifying→planning)    │
+  │   │  │ STUDY_*          │ (none required)                            │
+  │   │  │ REVIEW           │ (none required)                            │
+  │   │  │ VALIDATE         │ (none required)                            │
+  │   │  └─────────────────┴─────────────────────────────────────────────┘
+  │   │
+  │   │  Mode toggles (any state):
+  │   │    --guided / --no-guided
+  │   │
+  │   └─── Output: Updated forge.json + formatted status
+  │
+  │
+  ├── status ──────────── Print current state with action guidance
+  │   │
+  │   │  No additional flags (inherits --dir from root)
+  │   │
+  │   └─── Output: Human-readable status, next action, overview
+  │
+  │
+  ├── eval ────────────── Output evaluation context for sub-agent
+  │   │
+  │   │  Valid only in EVALUATE states
+  │   │  No additional flags
+  │   │
+  │   └─── Output: Full context needed by AI evaluator
+  │                (items, specs, tests, evaluator prompt)
+  │
+  │
+  ├── add-commit ──────── Register a commit hash to a spec
+  │   │
+  │   │  Required flags:
+  │   │    --id <int>      Spec ID
+  │   │    --hash <string> Commit hash (must exist in repo)
+  │   │
+  │   └─── Output: "Added {hash} to spec {id}."
+  │
+  │
+  ├── reconcile-commit ── Auto-register commit to all touched specs
+  │   │
+  │   │  Required flags:
+  │   │    --hash <string> Commit hash (must exist in repo)
+  │   │
+  │   │  Analyzes commit diff ──► matches files to specs
+  │   │
+  │   └─── Output: List of specs updated with the commit
+  │
+  │
+  └── --version ───────── Display version (v0.0.1)
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  TWO-ACTOR MODEL
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────┐         ┌─────────────────────────┐
+  │    ENGINEER              │         │    SUB-AGENT (AI)        │
+  │    (Primary Agent)       │         │    (Evaluator)           │
+  │                          │         │                          │
+  │  Uses:                   │         │  Uses:                   │
+  │    forgectl init         │         │    forgectl eval         │
+  │    forgectl advance      │         │                          │
+  │    forgectl status       │         │  Reads:                  │
+  │    forgectl add-commit   │         │    - Spec files          │
+  │    forgectl reconcile-   │         │    - Implementation      │
+  │             commit       │         │    - Notes/refs          │
+  │                          │         │    - Evaluator prompt    │
+  │  Writes:                 │         │                          │
+  │    - Specs               │         │  Writes:                 │
+  │    - Plans               │         │    - Eval reports        │
+  │    - Code                │         │    (evals/*.md)          │
+  │    - Notes               │         │                          │
+  └──────────┬───────────────┘         └──────────┬───────────────┘
+             │                                     │
+             │    forgectl advance                  │   forgectl eval
+             │    --verdict --eval-report           │
+             │                                     │
+             └──────────────┬──────────────────────┘
+                            │
+                            ▼
+                     ┌──────────────┐
+                     │  forge.json  │
+                     │  (state)     │
+                     └──────────────┘

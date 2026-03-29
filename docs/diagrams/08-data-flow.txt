@@ -1,0 +1,196 @@
+================================================================================
+                    FORGECTL — Data Flow & Artifact Map
+================================================================================
+
+  Shows what each phase consumes and produces, and how artifacts
+  flow between phases.
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  ARTIFACT FLOW ACROSS PHASES
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────┐
+  │  User / Planner  │
+  │                  │
+  │  Planning docs   │
+  │  Architecture    │
+  │  decisions       │
+  └────────┬─────────┘
+           │
+           │  produces
+           ▼
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                                                                      │
+  │  .workspace/planning/                                                │
+  │  ├── <domain>/concepts/*.md       ◄── Architecture concepts          │
+  │  ├── <domain>/diagrams/*.md       ◄── System diagrams                │
+  │  ├── implementation-planning/                                        │
+  │  │   ├── implementation-stack.md  ◄── Tech stack decisions           │
+  │  │   └── implementation-phases.md ◄── Phased delivery plan           │
+  │  └── SPEC_MANIFEST.md            ◄── Master spec index              │
+  │                                                                      │
+  └────────┬─────────────────────────────────────────────────────────────┘
+           │
+           │  consumed by
+           ▼
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  PHASE 1: SPECIFYING                                                ║
+  ║                                                                      ║
+  ║  Inputs:                          Outputs:                           ║
+  ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
+  ║  │ spec-queue.json      │          │ <project>/specs/             │   ║
+  ║  │                      │    ──►   │ ├── <spec-a>.md              │   ║
+  ║  │ {specs: [{           │          │ ├── <spec-b>.md              │   ║
+  ║  │   name, domain,      │          │ ├── <spec-c>.md              │   ║
+  ║  │   topic, file,       │          │ └── .eval/                   │   ║
+  ║  │   planning_sources,  │          │     ├── <spec-a>-r1.md       │   ║
+  ║  │   depends_on         │          │     └── <spec-a>-r2.md       │   ║
+  ║  │ }]}                  │          └─────────────────────────────┘   ║
+  ║  └─────────────────────┘                                             ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║  Planning docs (read-only)        │ forge.json (state)           │   ║
+  ║  Existing specs (read-only)       └─────────────────────────────┘   ║
+  ╚════════════════════════╤═════════════════════════════════════════════╝
+                           │
+                           │  specs flow down
+                           ▼
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  PHASE 2: PLANNING                                                  ║
+  ║                                                                      ║
+  ║  Inputs:                          Outputs:                           ║
+  ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
+  ║  │ plan-queue.json      │          │ <domain>/.workspace/         │   ║
+  ║  │                      │          │   implementation_plan/       │   ║
+  ║  │ {plans: [{           │    ──►   │   ├── plan.json              │   ║
+  ║  │   name, domain,      │          │   ├── notes/                 │   ║
+  ║  │   topic, file,       │          │   │   ├── <pkg-a>.md         │   ║
+  ║  │   specs[],           │          │   │   └── <pkg-b>.md         │   ║
+  ║  │   code_search_roots[]│          │   └── evals/                 │   ║
+  ║  │ }]}                  │          │       ├── round-1.md          │   ║
+  ║  └─────────────────────┘          │       └── round-2.md          │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║  Spec files (read-only)                                              ║
+  ║  Source code (read-only)          ┌─────────────────────────────┐   ║
+  ║  Package manifests (read-only)    │ forge.json (state)           │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ╚════════════════════════╤═════════════════════════════════════════════╝
+                           │
+                           │  plan.json flows down
+                           │  (mutated with passes/rounds)
+                           ▼
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  PHASE 3: IMPLEMENTING                                              ║
+  ║                                                                      ║
+  ║  Inputs:                          Outputs:                           ║
+  ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
+  ║  │ plan.json (mutated)  │          │ Production code              │   ║
+  ║  │                      │          │ (files listed in plan items) │   ║
+  ║  │ + passes: "pending"  │    ──►   └─────────────────────────────┘   ║
+  ║  │ + rounds: 0          │                                            ║
+  ║  │ (on every item)      │          ┌─────────────────────────────┐   ║
+  ║  └─────────────────────┘          │ <domain>/.workspace/         │   ║
+  ║                                   │   implementation_plan/       │   ║
+  ║  Spec files (read-only)           │   └── evals/                 │   ║
+  ║  Notes files (read-only)          │       ├── batch-1-round-1.md │   ║
+  ║  Source code (read/write)         │       └── batch-1-round-2.md │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ <domain>/.workspace/         │   ║
+  ║                                   │   implementation/            │   ║
+  ║                                   │   └── IMPLEMENTATION_LOG.md  │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ plan.json (updated)          │   ║
+  ║                                   │ items[].passes: passed|failed│   ║
+  ║                                   │ items[].rounds: N            │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ forge.json (state)           │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ╚══════════════════════════════════════════════════════════════════════╝
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  STATE FILE: forge.json
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Persistent across all phases. Written atomically (tmpfile → backup → rename).
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  forge.json                                                          │
+  │                                                                      │
+  │  {                                                                   │
+  │    "phase": "specifying | planning | implementing",                  │
+  │    "state": "<current state>",                                       │
+  │    "guided": true | false,                                           │
+  │    "batch_size": N,                                                  │
+  │    "max_rounds": N,                                                  │
+  │    "min_rounds": N,                                                  │
+  │                                                                      │
+  │    // Specifying phase:                                              │
+  │    "spec_queue": [...],                                              │
+  │    "active_spec": {...},                                             │
+  │    "completed_specs": [...],                                         │
+  │    "reconciliation": {...},                                          │
+  │                                                                      │
+  │    // Planning phase:                                                │
+  │    "plan_queue": [...],                                              │
+  │    "current_plan": {...},                                            │
+  │    "completed_plans": [...],                                         │
+  │                                                                      │
+  │    // Implementing phase:                                            │
+  │    "plan_file": "<path>",                                            │
+  │    "current_batch": [...],                                           │
+  │    "current_item_index": N,                                          │
+  │    "eval_history": [...]                                             │
+  │  }                                                                   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  PLAN.JSON STRUCTURE
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  plan.json                                                           │
+  │                                                                      │
+  │  context ─────► { domain: "api", module: "github.com/org/api" }     │
+  │                                                                      │
+  │  refs ────────► [                                                    │
+  │                   { id: "auth-spec", path: "../../specs/auth.md" }   │
+  │                 ]                                                     │
+  │                                                                      │
+  │  layers ──────► [                                                    │
+  │                   { id: "L0", name: "Foundation",                    │
+  │                     items: ["config.types", "config.load"] },        │
+  │                   { id: "L1", name: "Core Logic",                    │
+  │                     items: ["auth.middleware", "auth.token"] },       │
+  │                   { id: "L2", name: "Integration",                   │
+  │                     items: ["auth.routes"] }                          │
+  │                 ]                                                     │
+  │                                                                      │
+  │  items ───────► [                                                    │
+  │    {                                                                 │
+  │      id: "config.types",                                             │
+  │      name: "Configuration types",                                    │
+  │      description: "Go structs for service config",                   │
+  │      depends_on: [],                                                 │
+  │      steps: ["Create types.go", "Add validation tags"],              │
+  │      files: ["internal/config/types.go"],                            │
+  │      spec: "service-configuration.md",                               │
+  │      ref: "notes/config.md",                                         │
+  │      tests: [                                                        │
+  │        { category: "functional", description: "loads valid" },       │
+  │        { category: "rejection",  description: "rejects empty" },     │
+  │        { category: "edge_case",  description: "handles missing" }    │
+  │      ],                                                              │
+  │      passes: "pending",    ◄── added by PHASE_SHIFT                  │
+  │      rounds: 0             ◄── incremented each eval                 │
+  │    },                                                                │
+  │    ...                                                               │
+  │  ]                                                                   │
+  └──────────────────────────────────────────────────────────────────────┘

@@ -1,0 +1,209 @@
+================================================================================
+             PHASE 3: IMPLEMENTING — Detailed State Machine
+================================================================================
+
+  Role: Senior Software Engineer
+  Input: plan.json (with passes/rounds fields added by PHASE_SHIFT)
+  Output: Production code + evaluation reports + IMPLEMENTATION_LOG.md
+  Evaluator: AI sub-agent verifies code against spec tests
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  INITIALIZATION                                                         │
+  │                                                                         │
+  │  forgectl init \                                                        │
+  │    --from <domain>/.workspace/implementation_plan/plan.json \           │
+  │    --phase implementing \                                               │
+  │    --batch-size <N> \                                                   │
+  │    --max-rounds <N> --min-rounds 1 \                                    │
+  │    --guided                                                             │
+  │                                                                         │
+  │  OR: PHASE_SHIFT from planning phase (automatic)                        │
+  └────────────────────────────────┬────────────────────────────────────────┘
+                                   │
+                                   ▼
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  BATCH LOOP  (repeats for each batch of unblocked items)             ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                       ║
+  ║  ┌────────────────────────────────────────────────────────────────┐  ║
+  ║  │  ORIENT                                                        │  ║
+  ║  │                                                                │  ║
+  ║  │  - Review layer progress (e.g., "2/5 items passed")            │  ║
+  ║  │  - Show next batch composition                                 │  ║
+  ║  │  - If guided: STOP and discuss with user                       │  ║
+  ║  │                                                                │  ║
+  ║  │  Action: forgectl advance                                      │  ║
+  ║  └────────────────────────────┬───────────────────────────────────┘  ║
+  ║                               │                                       ║
+  ║                               ▼                                       ║
+  ║                                                                       ║
+  ║  ╔════════════════════════════════════════════════════════════════╗   ║
+  ║  ║  ITEM LOOP  (one item at a time within batch)                  ║   ║
+  ║  ╠════════════════════════════════════════════════════════════════╣   ║
+  ║  ║                                                                ║   ║
+  ║  ║  ┌────────────────────────────────────────────────────────┐   ║   ║
+  ║  ║  │  IMPLEMENT  (Round 1 — first time seeing item)          │   ║   ║
+  ║  ║  │                                                         │   ║   ║
+  ║  ║  │  Forgectl displays:                                     │   ║   ║
+  ║  ║  │  ┌───────────────────────────────────────────────┐     │   ║   ║
+  ║  ║  │  │  Item:    config.load  (1/3 in batch)          │     │   ║   ║
+  ║  ║  │  │  Name:    Load service configuration           │     │   ║   ║
+  ║  ║  │  │  Steps:   1. Create config struct              │     │   ║   ║
+  ║  ║  │  │           2. Add validation logic              │     │   ║   ║
+  ║  ║  │  │           3. Wire into service init            │     │   ║   ║
+  ║  ║  │  │  Files:   internal/config/load.go              │     │   ║   ║
+  ║  ║  │  │  Spec:    service-configuration.md             │     │   ║   ║
+  ║  ║  │  │  Ref:     notes/config.md                      │     │   ║   ║
+  ║  ║  │  │  Tests:   3 (2 functional, 1 edge_case)        │     │   ║   ║
+  ║  ║  │  └───────────────────────────────────────────────┘     │   ║   ║
+  ║  ║  │                                                         │   ║   ║
+  ║  ║  │  Engineer actions:                                      │   ║   ║
+  ║  ║  │  1. Read spec section for contract                      │   ║   ║
+  ║  ║  │  2. Read notes/ref for guidance                         │   ║   ║
+  ║  ║  │  3. Search codebase (confirm not already implemented)   │   ║   ║
+  ║  ║  │  4. Implement completely — NO stubs, NO placeholders    │   ║   ║
+  ║  ║  │  5. Run tests for changed/added code                    │   ║   ║
+  ║  ║  │  6. Fix any failures                                    │   ║   ║
+  ║  ║  │                                                         │   ║   ║
+  ║  ║  │  Action: forgectl advance --message "<what I did>"      │   ║   ║
+  ║  ║  │         (auto-commits on round 1)                       │   ║   ║
+  ║  ║  │                                                         │   ║   ║
+  ║  ║  │  Item marked: pending ──► done                          │   ║   ║
+  ║  ║  └────────────────────────┬────────────────────────────────┘   ║   ║
+  ║  ║                           │                                     ║   ║
+  ║  ║              ┌────────────┴────────────┐                        ║   ║
+  ║  ║              │                         │                        ║   ║
+  ║  ║        more items in             batch complete                 ║   ║
+  ║  ║          batch                         │                        ║   ║
+  ║  ║              │                         │                        ║   ║
+  ║  ║              ▼                         │                        ║   ║
+  ║  ║        ► IMPLEMENT                     │                        ║   ║
+  ║  ║          (next item)                   │                        ║   ║
+  ║  ║                                        │                        ║   ║
+  ║  ╚════════════════════════════════════════╪════════════════════════╝   ║
+  ║                                           │                            ║
+  ║                                           ▼                            ║
+  ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
+  ║  │  EVALUATION LOOP  (min_rounds..max_rounds)                      │  ║
+  ║  │                                                                  │  ║
+  ║  │  ┌────────────────────────────────────────────────────────┐     │  ║
+  ║  │  │  EVALUATE                                               │     │  ║
+  ║  │  │                                                         │     │  ║
+  ║  │  │  1. Run: forgectl eval  (get context for sub-agent)     │     │  ║
+  ║  │  │  2. Spawn sub-agent with evaluator prompt               │     │  ║
+  ║  │  │  3. Sub-agent checks:                                   │     │  ║
+  ║  │  │     - Completeness (all steps done?)                    │     │  ║
+  ║  │  │     - Correctness (matches spec?)                       │     │  ║
+  ║  │  │     - Test coverage (criteria satisfied?)               │     │  ║
+  ║  │  │     - Rejection handling (invalid inputs?)              │     │  ║
+  ║  │  │     - Edge cases (boundaries?)                          │     │  ║
+  ║  │  │     - Code quality (idiomatic?)                         │     │  ║
+  ║  │  │     - Integration (works with deps?)                    │     │  ║
+  ║  │  │                                                         │     │  ║
+  ║  │  │  Output: evals/batch-N-round-M.md                       │     │  ║
+  ║  │  │                                                         │     │  ║
+  ║  │  │  Action: forgectl advance \                              │     │  ║
+  ║  │  │    --eval-report <path> --verdict PASS|FAIL              │     │  ║
+  ║  │  └──────────┬──────────────────────┬──────────────────────┘     │  ║
+  ║  │             │                      │                             │  ║
+  ║  │   ┌─────── │ ──────────┐           │                             │  ║
+  ║  │   │        │           │           │                             │  ║
+  ║  │   │  FAIL  │     PASS  │     PASS  │    FAIL                     │  ║
+  ║  │   │  <max  │     <min  │     >=min │    >=max                    │  ║
+  ║  │   │        │           │           │    (forced)                  │  ║
+  ║  │   ▼        ▼           │           ▼                             │  ║
+  ║  │                        │                                         │  ║
+  ║  │   IMPLEMENT (round 2+) │      COMMIT                             │  ║
+  ║  │                        │     items: passed                        │  ║
+  ║  │   - Study eval report  │                                         │  ║
+  ║  │   - Fix deficiencies   │      COMMIT                             │  ║
+  ║  │   - Run tests          │     items: failed                        │  ║
+  ║  │   - No --message       │                                         │  ║
+  ║  │   - No auto-commit     │                                         │  ║
+  ║  │                        │                                         │  ║
+  ║  │   forgectl advance     │                                         │  ║
+  ║  │       │                │                                         │  ║
+  ║  │       └──► EVALUATE    │                                         │  ║
+  ║  │                        │                                         │  ║
+  ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
+  ║                           │                                            ║
+  ║                           ▼                                            ║
+  ║  ┌────────────────────────────────────────────────────────────────┐   ║
+  ║  │  COMMIT  (hard stop — must commit before continuing)           │   ║
+  ║  │                                                                │   ║
+  ║  │  1. git add -A && git commit -m "<message>"                    │   ║
+  ║  │  2. Add entry to IMPLEMENTATION_LOG.md:                        │   ║
+  ║  │     ┌──────────────────────────────────────────────┐          │   ║
+  ║  │     │ ### 2026-03-29 — L1: Config Loading           │          │   ║
+  ║  │     │ - Errors: None                                │          │   ║
+  ║  │     │ - All Tests Pass: Yes                         │          │   ║
+  ║  │     │ - Batch: 1/3                                  │          │   ║
+  ║  │     │ - Eval Rounds: 2                              │          │   ║
+  ║  │     │ - Notes: Clean implementation, all tests pass │          │   ║
+  ║  │     └──────────────────────────────────────────────┘          │   ║
+  ║  │  3. forgectl advance --message "<commit msg>"                  │   ║
+  ║  └────────────────────────────┬───────────────────────────────────┘   ║
+  ║                               │                                       ║
+  ║              ┌────────────────┴────────────────┐                      ║
+  ║              │                                  │                      ║
+  ║        more batches /                    all items                     ║
+  ║        more layers                       complete                     ║
+  ║              │                                  │                      ║
+  ║              ▼                                  ▼                      ║
+  ║         ► ORIENT                             DONE                     ║
+  ║           (next batch)                          │                      ║
+  ╚═════════════════════════════════════════════════╪══════════════════════╝
+                                                    │
+                                                    ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  DONE  (terminal state)                                                 │
+  │                                                                         │
+  │  - All layers complete                                                  │
+  │  - All items marked: passed or failed                                   │
+  │  - Final summary in IMPLEMENTATION_LOG.md                               │
+  │  - Session finished                                                     │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  BATCH SELECTION ALGORITHM
+  ═══════════════════════════════════════════════════════════════════════════
+
+  An item is "unblocked" when:
+    1. All items in prior layers have terminal passes (passed | failed)
+    2. All items in its depends_on[] have terminal passes
+
+  Batch = up to batch_size unblocked items, selected in layer items[] order
+
+  Layer Progression:
+    Layer 0 (Foundation)  ──►  Layer 1 (Core)  ──►  Layer 2 (Integration)
+         │                          │                       │
+    ┌────┴────┐              ┌──────┴──────┐          ┌─────┴─────┐
+    │ item.a  │              │   item.c    │          │  item.e   │
+    │ item.b  │              │   item.d    │          │  item.f   │
+    └─────────┘              └─────────────┘          └───────────┘
+
+  Item State Progression:
+    pending ──► done ──► passed   (PASS + rounds >= min_rounds)
+                   └──► failed   (FAIL + rounds >= max_rounds)
+
+  ═══════════════════════════════════════════════════════════════════════════
+  ITEM PROGRESS TRACKING  (in plan.json)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  {
+    "id": "config.load",
+    "passes": "pending",    ◄── added by PHASE_SHIFT
+    "rounds": 0,            ◄── incremented each evaluation
+    ...
+  }
+
+  Transition table:
+    pending  + advance in IMPLEMENT  ──►  done
+    done     + PASS (>= min_rounds)  ──►  passed
+    done     + FAIL (>= max_rounds)  ──►  failed
+    done     + FAIL (< max_rounds)   ──►  done  (stays, re-implement)
+    done     + PASS (< min_rounds)   ──►  done  (stays, refine more)
+
+  Note: failed items are terminal — they do NOT block dependents.
