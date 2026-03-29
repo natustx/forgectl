@@ -6,6 +6,8 @@ Configuration lives in `.forgectl/config` (TOML format) at the project root. The
 
 At `forgectl init`, the scaffold reads `.forgectl/config` and locks the effective configuration into the state file. From that point on, the session uses the state file's `config` object. Edits to `.forgectl/config` mid-session have no effect on the active session.
 
+The scaffold does not spawn sub-agents. It outputs instructions telling the architect what to spawn. The architect (or the skill driving the session) is responsible for spawning them. See `docs/sub-agent-spawn-points.md` for the full spawn point reference.
+
 ## Directory Structure
 
 ```
@@ -45,17 +47,42 @@ batch = 3
 [specifying.eval]
 min_rounds = 1
 max_rounds = 3
+agent_type = "opus"
+agent_count = 1
+
+[specifying.cross_reference]
+min_rounds = 1
+max_rounds = 2
+agent_type = "haiku"
+agent_count = 3
+user_review = false
+
+[specifying.cross_reference.eval]
+agent_type = "opus"
+agent_count = 1
 
 [specifying.reconciliation]
 min_rounds = 0
 max_rounds = 3
+agent_type = "opus"
+agent_count = 1
 
 [planning]
 batch = 1
 
+[planning.study_code]
+agent_type = "haiku"
+agent_count = 3
+
 [planning.eval]
 min_rounds = 1
 max_rounds = 3
+agent_type = "opus"
+agent_count = 1
+
+[planning.refine]
+agent_type = "opus"
+agent_count = 1
 
 [implementing]
 batch = 2
@@ -63,6 +90,8 @@ batch = 2
 [implementing.eval]
 min_rounds = 1
 max_rounds = 3
+agent_type = "opus"
+agent_count = 1
 
 [paths]
 state_dir = ".forgectl/state"
@@ -74,6 +103,15 @@ enable_commits = false
 ```
 
 ## Configuration Parameters
+
+### Sub-Agent Configuration
+
+Every configuration section that involves spawning sub-agents includes `agent_type` and `agent_count`:
+
+- **`agent_type`** — A string identifying the type of sub-agent to spawn. Can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`).
+- **`agent_count`** — An integer specifying how many sub-agents to spawn. Must be >= 1.
+
+The scaffold outputs these values in spawn instructions: `"Please spawn {count} {type} sub-agent(s) to {purpose}."`
 
 ### Specifying Phase
 
@@ -101,6 +139,74 @@ Minimum evaluation rounds before a PASS verdict can accept a spec batch. PASS be
 
 Maximum evaluation rounds for a spec batch. FAIL at this threshold forces acceptance.
 
+#### `specifying.eval.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for spec batch evaluation at EVALUATE state.
+
+#### `specifying.eval.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for spec batch evaluation.
+
+#### `specifying.cross_reference.min_rounds`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1, <= specifying.cross_reference.max_rounds
+
+Minimum evaluation rounds for domain cross-reference. PASS below this threshold forces another cycle.
+
+#### `specifying.cross_reference.max_rounds`
+
+- **Type:** integer
+- **Default:** 2
+- **Constraint:** >= specifying.cross_reference.min_rounds
+
+Maximum evaluation rounds for domain cross-reference. FAIL at this threshold forces acceptance.
+
+#### `specifying.cross_reference.agent_type`
+
+- **Type:** string
+- **Default:** `"haiku"`
+
+Sub-agent type for cross-referencing domain specs at CROSS_REFERENCE state.
+
+#### `specifying.cross_reference.agent_count`
+
+- **Type:** integer
+- **Default:** 3
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for domain cross-referencing.
+
+#### `specifying.cross_reference.user_review`
+
+- **Type:** boolean
+- **Default:** false
+
+When true, the scaffold pauses at CROSS_REFERENCE_REVIEW after the first CROSS_REFERENCE_EVAL (regardless of verdict). This fires even when `general.user_guided` is false. The pause asks the architect to review with their user before continuing. Only fires once per domain — subsequent rounds skip the review pause.
+
+#### `specifying.cross_reference.eval.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
+
+#### `specifying.cross_reference.eval.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for cross-reference evaluation.
+
 #### `specifying.reconciliation.min_rounds`
 
 - **Type:** integer
@@ -117,6 +223,21 @@ Minimum reconciliation eval rounds before a PASS verdict can complete the specif
 
 Maximum reconciliation eval rounds. FAIL at this threshold forces completion.
 
+#### `specifying.reconciliation.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for reconciliation evaluation at RECONCILE_EVAL state.
+
+#### `specifying.reconciliation.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for reconciliation evaluation.
+
 ### Planning Phase
 
 #### `planning.batch`
@@ -126,6 +247,21 @@ Maximum reconciliation eval rounds. FAIL at this threshold forces completion.
 - **Constraint:** >= 1
 
 Number of plans processed per planning cycle. TODO: values > 1 are not yet supported by the planning state machine. Reserved for future use.
+
+#### `planning.study_code.agent_type`
+
+- **Type:** string
+- **Default:** `"haiku"`
+
+Sub-agent type for codebase exploration at STUDY_CODE state.
+
+#### `planning.study_code.agent_count`
+
+- **Type:** integer
+- **Default:** 3
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for codebase exploration.
 
 #### `planning.eval.min_rounds`
 
@@ -142,6 +278,36 @@ Minimum evaluation rounds before a PASS verdict can accept a plan.
 - **Constraint:** >= planning.eval.min_rounds
 
 Maximum evaluation rounds for a plan. FAIL at this threshold forces acceptance.
+
+#### `planning.eval.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for plan evaluation at EVALUATE state.
+
+#### `planning.eval.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for plan evaluation.
+
+#### `planning.refine.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for updating plan from eval findings at REFINE state.
+
+#### `planning.refine.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for plan refinement.
 
 ### Implementing Phase
 
@@ -168,6 +334,21 @@ Minimum evaluation rounds before a PASS verdict can accept an implementation bat
 - **Constraint:** >= implementing.eval.min_rounds
 
 Maximum evaluation rounds for an implementation batch. FAIL at this threshold forces acceptance.
+
+#### `implementing.eval.agent_type`
+
+- **Type:** string
+- **Default:** `"opus"`
+
+Sub-agent type for implementation evaluation at EVALUATE state.
+
+#### `implementing.eval.agent_count`
+
+- **Type:** integer
+- **Default:** 1
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for implementation evaluation.
 
 ### Paths
 
@@ -217,16 +398,26 @@ After `init`, the effective configuration is stored in the state file's `config`
   "config": {
     "specifying": {
       "batch": 3,
-      "eval": { "min_rounds": 1, "max_rounds": 3 },
-      "reconciliation": { "min_rounds": 0, "max_rounds": 3 }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
+      "cross_reference": {
+        "min_rounds": 1,
+        "max_rounds": 2,
+        "agent_type": "haiku",
+        "agent_count": 3,
+        "user_review": false,
+        "eval": { "agent_type": "opus", "agent_count": 1 }
+      },
+      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
     },
     "planning": {
       "batch": 1,
-      "eval": { "min_rounds": 1, "max_rounds": 3 }
+      "study_code": { "agent_type": "haiku", "agent_count": 3 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
+      "refine": { "agent_type": "opus", "agent_count": 1 }
     },
     "implementing": {
       "batch": 2,
-      "eval": { "min_rounds": 1, "max_rounds": 3 }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
     },
     "paths": {
       "state_dir": ".forgectl/state",
@@ -260,10 +451,9 @@ All other configuration is read from `.forgectl/config`.
 | Flag | Context | Description |
 |------|---------|-------------|
 | `--guided` / `--no-guided` | any state | Toggle guided mode (updates `config.general.user_guided` in state) |
-| `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL | Evaluation verdict |
-| `--eval-report <path>` | EVALUATE, RECONCILE_EVAL | Path to evaluation report |
+| `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Evaluation verdict |
+| `--eval-report <path>` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Path to evaluation report |
 | `--message <text>` | COMMIT, ACCEPT (when `enable_commits: true`) | Commit message |
-| `--file <path>` | specifying DRAFT | Override spec file path |
 | `--from <path>` | PHASE_SHIFT (specifying→planning) | Plan queue input file |
 
 ## Non-Config Session Fields
