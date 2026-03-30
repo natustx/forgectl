@@ -70,15 +70,24 @@ func AddCommitToSpec(s *ForgeState, specID int, hash string) error {
 	}
 
 	// Check if active.
-	if s.Specifying.CurrentSpec != nil && s.Specifying.CurrentSpec.ID == specID {
-		return fmt.Errorf("spec %d is still active", specID)
+	for _, cs := range s.Specifying.CurrentSpecs {
+		if cs != nil && cs.ID == specID {
+			return fmt.Errorf("spec %d is still active", specID)
+		}
 	}
 
 	return fmt.Errorf("no completed spec with ID %d", specID)
 }
 
+// MatchedSpec identifies a completed spec matched by ReconcileCommit.
+type MatchedSpec struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // ReconcileCommit matches a commit's changed files against completed spec file paths.
-func ReconcileCommit(s *ForgeState, workDir string, hash string) ([]string, error) {
+// Returns the matched specs (ID + Name) for each spec that was updated.
+func ReconcileCommit(s *ForgeState, workDir string, hash string) ([]MatchedSpec, error) {
 	if s.Specifying == nil {
 		return nil, fmt.Errorf("no specifying phase data")
 	}
@@ -88,7 +97,7 @@ func ReconcileCommit(s *ForgeState, workDir string, hash string) ([]string, erro
 		return nil, err
 	}
 
-	var updated []string
+	var updated []MatchedSpec
 	for i := range s.Specifying.Completed {
 		for _, f := range files {
 			if f == s.Specifying.Completed[i].File {
@@ -102,7 +111,10 @@ func ReconcileCommit(s *ForgeState, workDir string, hash string) ([]string, erro
 				}
 				if !isDup {
 					s.Specifying.Completed[i].CommitHashes = append(s.Specifying.Completed[i].CommitHashes, hash)
-					updated = append(updated, s.Specifying.Completed[i].Name)
+					updated = append(updated, MatchedSpec{
+						ID:   s.Specifying.Completed[i].ID,
+						Name: s.Specifying.Completed[i].Name,
+					})
 				}
 				break
 			}
