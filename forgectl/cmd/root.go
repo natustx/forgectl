@@ -26,14 +26,14 @@ func Execute() {
 }
 
 // resolveSession discovers the project root, loads config, and returns
-// (projectRoot, stateDir). projectRoot is used to resolve relative paths in state;
-// stateDir is used for Load/Save/Exists operations.
-func resolveSession() (projectRoot, stateDir string, err error) {
+// (projectRoot, stateDir, cfg). projectRoot resolves relative paths in state;
+// stateDir is used for Load/Save/Exists; cfg is the loaded project configuration.
+func resolveSession() (projectRoot, stateDir string, cfg state.Config, err error) {
 	projectRoot, err = state.FindProjectRoot()
 	if err != nil {
 		return
 	}
-	cfg, err := state.LoadConfig(projectRoot)
+	cfg, err = state.LoadConfig(projectRoot)
 	if err != nil {
 		return
 	}

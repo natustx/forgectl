@@ -55,12 +55,7 @@ func TestInitCommand(t *testing.T) {
 	os.WriteFile(queueFile, data, 0644)
 
 	initFrom = queueFile
-	initBatchSize = 2
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "specifying"
-	initGuided = true
-	initNoGuided = false
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -71,8 +66,8 @@ func TestInitCommand(t *testing.T) {
 	}
 
 	// Load state from the resolved state dir and verify.
-	stateDir := resolvedStateDir(dir)
-	s, err := state.Load(stateDir)
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -85,6 +80,52 @@ func TestInitCommand(t *testing.T) {
 	}
 	if len(s.Specifying.Queue) != 2 {
 		t.Errorf("queue has %d specs, want 2", len(s.Specifying.Queue))
+	}
+	if s.SessionID == "" {
+		t.Error("session_id should be set")
+	}
+}
+
+func TestInitLocksConfig(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Write a custom config to verify it gets locked in.
+	customCfg := `[specifying]
+batch = 5
+
+[implementing]
+batch = 7
+`
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(customCfg), 0644)
+
+	input := state.SpecQueueInput{
+		Specs: []state.SpecQueueEntry{
+			{Name: "Spec A", Domain: "test", Topic: "t", File: "a.md", PlanningSources: []string{}, DependsOn: []string{}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, data, 0644)
+
+	initFrom = queueFile
+	initPhase = "specifying"
+
+	err := runInit(initCmd, nil)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if s.Config.Specifying.Batch != 5 {
+		t.Errorf("config.specifying.batch = %d, want 5", s.Config.Specifying.Batch)
+	}
+	if s.Config.Implementing.Batch != 7 {
+		t.Errorf("config.implementing.batch = %d, want 7", s.Config.Implementing.Batch)
 	}
 }
 
@@ -100,9 +141,6 @@ func TestInitRejectsExistingState(t *testing.T) {
 	state.Save(sd, s)
 
 	initFrom = "dummy"
-	initBatchSize = 1
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "specifying"
 
 	err := runInit(initCmd, nil)
@@ -111,45 +149,33 @@ func TestInitRejectsExistingState(t *testing.T) {
 	}
 }
 
-func TestInitRejectsInvalidConfig(t *testing.T) {
-	tests := []struct {
-		name      string
-		batchSize int
-		minRounds int
-		maxRounds int
-	}{
-		{"batch-size 0", 0, 1, 3},
-		{"min exceeds max", 2, 5, 2},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setupProjectDir(t)
-			initFrom = "dummy"
-			initBatchSize = tt.batchSize
-			initMinRounds = tt.minRounds
-			initMaxRounds = tt.maxRounds
-			initPhase = "specifying"
-
-			err := runInit(initCmd, nil)
-			if err == nil {
-				t.Error("expected error")
-			}
-		})
-	}
-}
-
 func TestInitRejectsInvalidPhase(t *testing.T) {
 	setupProjectDir(t)
 	initFrom = "dummy"
-	initBatchSize = 1
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "invalid"
 
 	err := runInit(initCmd, nil)
 	if err == nil {
 		t.Error("expected error for invalid phase")
+	}
+}
+
+func TestInitRejectsInvalidConfig(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Write config with constraint violation.
+	badCfg := `[specifying.eval]
+min_rounds = 5
+max_rounds = 2
+`
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(badCfg), 0644)
+
+	initFrom = "dummy"
+	initPhase = "specifying"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Error("expected error for invalid config")
 	}
 }
 
@@ -162,10 +188,6 @@ func TestStatusCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := state.DefaultConfig()
-	cfg.Implementing.Batch = 2
-	cfg.Implementing.Eval.MinRounds = 1
-	cfg.Implementing.Eval.MaxRounds = 3
-	cfg.General.UserGuided = true
 	s := &state.ForgeState{
 		Phase:          state.PhaseSpecifying,
 		State:          state.StateOrient,
