@@ -17,11 +17,15 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	projectRoot, stateDir, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
 	}
 
-	state.PrintStatus(cmd.OutOrStdout(), s, stateDir)
+	state.PrintStatus(cmd.OutOrStdout(), s, projectRoot)
 	return nil
 }

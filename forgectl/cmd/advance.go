@@ -36,6 +36,10 @@ func init() {
 }
 
 func runAdvance(cmd *cobra.Command, args []string) error {
+	projectRoot, stateDir, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
@@ -68,7 +72,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 
 	out := cmd.OutOrStdout()
 
-	err = state.Advance(s, in, stateDir)
+	err = state.Advance(s, in, projectRoot)
 	if err != nil {
 		// Check if it's a validation error — still save state if VALIDATE was entered.
 		if ve, ok := err.(*state.ValidationError); ok {
@@ -76,7 +80,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("saving state: %w", err2)
 			}
 			fmt.Fprintln(out)
-			state.PrintAdvanceOutput(out, s, stateDir)
+			state.PrintAdvanceOutput(out, s, projectRoot)
 			fmt.Fprintln(out)
 			fmt.Fprintf(out, "FAIL: %d errors in plan.json\n\n", len(ve.Errors))
 			for _, e := range ve.Errors {
@@ -91,7 +95,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	state.PrintAdvanceOutput(out, s, stateDir)
+	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
 }

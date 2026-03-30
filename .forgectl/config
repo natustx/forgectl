@@ -1,0 +1,10 @@
+[implementing]
+batch = 1
+
+[implementing.eval]
+min_rounds = 1
+max_rounds = 3
+
+[general]
+user_guided = false
+enable_commits = false
