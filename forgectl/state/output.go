@@ -772,18 +772,53 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 	fmt.Fprintf(w, "State:   PHASE_SHIFT\n")
 	fmt.Fprintf(w, "From:    %s → %s\n", ps.From, ps.To)
 
-	if ps.From == PhasePlanning && ps.To == PhaseImplementing {
+	if ps.From == PhaseSpecifying && ps.To == PhasePlanning {
+		if s.Specifying != nil {
+			// Collect domain order and per-domain roots.
+			var domainOrder []string
+			domainSeen := make(map[string]bool)
+			for _, cs := range s.Specifying.Completed {
+				if !domainSeen[cs.Domain] {
+					domainSeen[cs.Domain] = true
+					domainOrder = append(domainOrder, cs.Domain)
+				}
+			}
+			fmt.Fprintf(w, "\nDomains:  %d (%s)\n", len(domainOrder), strings.Join(domainOrder, ", "))
+			fmt.Fprintf(w, "Specs:    %d completed\n", len(s.Specifying.Completed))
+			for i, domain := range domainOrder {
+				var roots []string
+				isDefault := false
+				if meta, ok := s.Specifying.Domains[domain]; ok && len(meta.CodeSearchRoots) > 0 {
+					roots = meta.CodeSearchRoots
+				} else {
+					roots = []string{domain + "/"}
+					isDefault = true
+				}
+				rootStr := strings.Join(roots, ", ")
+				if isDefault {
+					rootStr += " (default)"
+				}
+				if i == 0 {
+					fmt.Fprintf(w, "Roots:    %s → %s\n", domain, rootStr)
+				} else {
+					fmt.Fprintf(w, "          %s → %s\n", domain, rootStr)
+				}
+			}
+		}
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
+		fmt.Fprintf(w, "When ready, run:\n")
+		fmt.Fprintf(w, "  forgectl advance                          # auto-generate plan queue from completed specs\n")
+		fmt.Fprintf(w, "  forgectl advance --from <plan-queue.json> # OR provide a custom plan queue\n")
+	} else if ps.From == PhasePlanning && ps.To == PhaseImplementing {
 		if s.Planning != nil && s.Planning.CurrentPlan != nil {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
 			fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
 		}
-	}
-
-	fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
-	if ps.From == PhaseSpecifying && ps.To == PhasePlanning {
-		fmt.Fprintf(w, "When ready, run: forgectl advance --from <plans-queue.json>\n")
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
+		fmt.Fprintf(w, "When ready, run: forgectl advance\n")
 	} else {
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
 		fmt.Fprintf(w, "When ready, run: forgectl advance\n")
 	}
 }

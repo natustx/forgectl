@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Advance transitions the state machine forward based on current state and input.
@@ -626,24 +627,37 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 
 	switch {
 	case s.PhaseShift.From == PhaseSpecifying && s.PhaseShift.To == PhasePlanning:
-		if in.From == "" {
-			return fmt.Errorf("--from <plans-queue.json> is required at this phase shift")
-		}
-		data, err := os.ReadFile(in.From)
-		if err != nil {
-			return fmt.Errorf("reading plan queue: %w", err)
-		}
-		validationErrs := ValidatePlanQueue(data)
-		if len(validationErrs) > 0 {
-			return &ValidationError{Errors: validationErrs}
+		var plans []PlanQueueEntry
+
+		if in.From != "" {
+			// Override mode: validate and use external file.
+			data, err := os.ReadFile(in.From)
+			if err != nil {
+				return fmt.Errorf("reading plan queue: %w", err)
+			}
+			validationErrs := ValidatePlanQueue(data)
+			if len(validationErrs) > 0 {
+				return &ValidationError{Errors: validationErrs}
+			}
+			var input PlanQueueInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return fmt.Errorf("parsing plan queue: %w", err)
+			}
+			plans = input.Plans
+		} else {
+			// Auto-generate from completed specs.
+			plans = autoGeneratePlanQueue(s.Specifying)
+			data, err := json.Marshal(PlanQueueInput{Plans: plans})
+			if err != nil {
+				return fmt.Errorf("marshaling auto-generated queue: %w", err)
+			}
+			validationErrs := ValidatePlanQueue(data)
+			if len(validationErrs) > 0 {
+				return &ValidationError{Errors: validationErrs}
+			}
 		}
 
-		var input PlanQueueInput
-		if err := json.Unmarshal(data, &input); err != nil {
-			return fmt.Errorf("parsing plan queue: %w", err)
-		}
-
-		s.Planning = NewPlanningState(input.Plans)
+		s.Planning = NewPlanningState(plans)
 		// Pull first plan.
 		if len(s.Planning.Queue) > 0 {
 			entry := s.Planning.Queue[0]
@@ -710,6 +724,63 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 }
 
 // --- Helpers ---
+
+// autoGeneratePlanQueue builds a plan queue from completed specifying-phase specs.
+// One PlanQueueEntry is produced per domain, preserving domain order of first appearance.
+func autoGeneratePlanQueue(spec *SpecifyingState) []PlanQueueEntry {
+	// Group specs by domain, preserving order of first appearance.
+	type domainGroup struct {
+		specs   []CompletedSpec
+		seenIdx int
+	}
+	groupMap := make(map[string]*domainGroup)
+	var domainOrder []string
+	for _, cs := range spec.Completed {
+		if _, seen := groupMap[cs.Domain]; !seen {
+			groupMap[cs.Domain] = &domainGroup{}
+			domainOrder = append(domainOrder, cs.Domain)
+		}
+		groupMap[cs.Domain].specs = append(groupMap[cs.Domain].specs, cs)
+	}
+
+	var plans []PlanQueueEntry
+	for _, domain := range domainOrder {
+		group := groupMap[domain]
+
+		var specFiles []string
+		commitSet := make(map[string]bool)
+		var specCommits []string
+		for _, cs := range group.specs {
+			specFiles = append(specFiles, cs.File)
+			for _, h := range cs.CommitHashes {
+				if !commitSet[h] {
+					commitSet[h] = true
+					specCommits = append(specCommits, h)
+				}
+			}
+		}
+
+		var roots []string
+		if meta, ok := spec.Domains[domain]; ok && len(meta.CodeSearchRoots) > 0 {
+			roots = meta.CodeSearchRoots
+		} else {
+			roots = []string{domain + "/"}
+		}
+
+		// Capitalize first letter of domain name.
+		name := strings.ToUpper(domain[:1]) + domain[1:] + " Implementation Plan"
+
+		plans = append(plans, PlanQueueEntry{
+			Name:            name,
+			Domain:          domain,
+			File:            domain + "/.forge_workspace/implementation_plan/plan.json",
+			Specs:           specFiles,
+			SpecCommits:     specCommits,
+			CodeSearchRoots: roots,
+		})
+	}
+	return plans
+}
 
 func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 	var planPath string
