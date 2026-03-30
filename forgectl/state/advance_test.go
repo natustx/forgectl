@@ -1029,14 +1029,143 @@ func TestCompleteToPhaseShift(t *testing.T) {
 
 // --- Phase Shift Tests ---
 
-func TestPhaseShiftSpecifyingToPlanningRequiresFrom(t *testing.T) {
-	s := newSpecifyingState(1)
-	advanceToComplete(t, s)
-	Advance(s, AdvanceInput{}, "") // → PHASE_SHIFT
+func TestPhaseShiftSpecifyingToPlanningAutoGenerates(t *testing.T) {
+	// --from is optional; omitting it auto-generates the plan queue from completed specs.
+	s := &ForgeState{
+		Phase:  PhaseSpecifying,
+		State:  StatePhaseShift,
+		Config: makeTestConfig(2, 1, 3),
+		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
+		Specifying: &SpecifyingState{
+			Completed: []CompletedSpec{
+				{ID: 1, Name: "Spec1", Domain: "test", File: "test/specs/spec1.md", CommitHashes: []string{}},
+			},
+			Domains: map[string]DomainMeta{},
+		},
+	}
 
-	err := Advance(s, AdvanceInput{}, "")
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("expected planning, got %s", s.Phase)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT, got %s", s.State)
+	}
+	if s.Planning == nil || s.Planning.CurrentPlan == nil {
+		t.Fatal("expected current plan to be populated")
+	}
+	if s.Planning.CurrentPlan.Domain != "test" {
+		t.Errorf("expected domain 'test', got %s", s.Planning.CurrentPlan.Domain)
+	}
+	wantRoots := []string{"test/"}
+	if len(s.Planning.CurrentPlan.CodeSearchRoots) != 1 || s.Planning.CurrentPlan.CodeSearchRoots[0] != wantRoots[0] {
+		t.Errorf("expected roots %v, got %v", wantRoots, s.Planning.CurrentPlan.CodeSearchRoots)
+	}
+}
+
+func TestPhaseShiftAutoGeneratesTwoDomains(t *testing.T) {
+	// Two domains: optimizer has set-roots, portal uses default.
+	s := &ForgeState{
+		Phase:  PhaseSpecifying,
+		State:  StatePhaseShift,
+		Config: makeTestConfig(2, 1, 3),
+		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
+		Specifying: &SpecifyingState{
+			Completed: []CompletedSpec{
+				{ID: 1, Name: "Optimizer Spec 1", Domain: "optimizer", File: "optimizer/specs/s1.md"},
+				{ID: 2, Name: "Optimizer Spec 2", Domain: "optimizer", File: "optimizer/specs/s2.md"},
+				{ID: 3, Name: "Portal Spec 1", Domain: "portal", File: "portal/specs/s1.md"},
+				{ID: 4, Name: "Portal Spec 2", Domain: "portal", File: "portal/specs/s2.md"},
+			},
+			Domains: map[string]DomainMeta{
+				"optimizer": {CodeSearchRoots: []string{"optimizer/", "lib/shared/"}},
+			},
+		},
+	}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Fatalf("expected planning, got %s", s.Phase)
+	}
+	// First plan should be optimizer with custom roots.
+	plan := s.Planning.CurrentPlan
+	if plan.Domain != "optimizer" {
+		t.Errorf("expected optimizer domain, got %s", plan.Domain)
+	}
+	if len(plan.CodeSearchRoots) != 2 || plan.CodeSearchRoots[0] != "optimizer/" || plan.CodeSearchRoots[1] != "lib/shared/" {
+		t.Errorf("expected custom roots for optimizer, got %v", plan.CodeSearchRoots)
+	}
+	// Queue should have portal with default root.
+	if len(s.Planning.Queue) != 1 {
+		t.Fatalf("expected 1 plan in queue, got %d", len(s.Planning.Queue))
+	}
+	portalPlan := s.Planning.Queue[0]
+	if portalPlan.Domain != "portal" {
+		t.Errorf("expected portal in queue, got %s", portalPlan.Domain)
+	}
+	if len(portalPlan.CodeSearchRoots) != 1 || portalPlan.CodeSearchRoots[0] != "portal/" {
+		t.Errorf("expected default roots for portal, got %v", portalPlan.CodeSearchRoots)
+	}
+}
+
+func TestPhaseShiftAutoGeneratesSpecCommits(t *testing.T) {
+	// Commit hashes from multiple specs in the same domain are deduplicated.
+	s := &ForgeState{
+		Phase:  PhaseSpecifying,
+		State:  StatePhaseShift,
+		Config: makeTestConfig(2, 1, 3),
+		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
+		Specifying: &SpecifyingState{
+			Completed: []CompletedSpec{
+				{ID: 1, Domain: "app", File: "app/specs/a.md", CommitHashes: []string{"7cede10", "8743b1d"}},
+				{ID: 2, Domain: "app", File: "app/specs/b.md", CommitHashes: []string{"8743b1d", "abc1234"}},
+			},
+			Domains: map[string]DomainMeta{},
+		},
+	}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	plan := s.Planning.CurrentPlan
+	want := []string{"7cede10", "8743b1d", "abc1234"}
+	if len(plan.SpecCommits) != len(want) {
+		t.Fatalf("spec_commits = %v, want %v", plan.SpecCommits, want)
+	}
+	for i, c := range want {
+		if plan.SpecCommits[i] != c {
+			t.Errorf("spec_commits[%d] = %s, want %s", i, plan.SpecCommits[i], c)
+		}
+	}
+}
+
+func TestPhaseShiftSpecifyingToPlanningInvalidFromFails(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseSpecifying,
+		State:  StatePhaseShift,
+		Config: makeTestConfig(2, 1, 3),
+		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
+		Specifying: &SpecifyingState{
+			Completed: []CompletedSpec{
+				{ID: 1, Domain: "test", File: "test/specs/a.md"},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	invalidFile := filepath.Join(dir, "invalid.json")
+	os.WriteFile(invalidFile, []byte(`{"invalid": true}`), 0644)
+
+	err := Advance(s, AdvanceInput{From: invalidFile}, "")
 	if err == nil {
-		t.Error("expected error for missing --from at phase shift")
+		t.Error("expected validation error for invalid --from")
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("state should remain PHASE_SHIFT on invalid --from, got %s", s.State)
 	}
 }
 
