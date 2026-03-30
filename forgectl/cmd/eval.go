@@ -18,10 +18,14 @@ func init() {
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
+	projectRoot, stateDir, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
 	}
 
-	return state.PrintEvalOutput(cmd.OutOrStdout(), s, stateDir)
+	return state.PrintEvalOutput(cmd.OutOrStdout(), s, projectRoot)
 }

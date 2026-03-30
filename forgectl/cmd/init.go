@@ -57,6 +57,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--phase must be specifying, planning, or implementing")
 	}
 
+	projectRoot, stateDir, err := resolveSession()
+	if err != nil {
+		return err
+	}
+
 	if state.Exists(stateDir) {
 		return fmt.Errorf("State file already exists. Delete it to reinitialize.")
 	}
@@ -179,11 +184,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return fmt.Errorf("creating state dir: %w", err)
+	}
+
 	if err := state.Save(stateDir, s); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	state.PrintAdvanceOutput(out, s, stateDir)
+	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
 }

@@ -133,6 +133,16 @@ func Save(dir string, s *ForgeState) error {
 	return nil
 }
 
+// StateDir returns the absolute path to the state directory.
+// If cfg.Paths.StateDir is absolute, it is returned as-is.
+// Otherwise, it is joined with projectRoot.
+func StateDir(projectRoot string, cfg Config) string {
+	if filepath.IsAbs(cfg.Paths.StateDir) {
+		return cfg.Paths.StateDir
+	}
+	return filepath.Join(projectRoot, cfg.Paths.StateDir)
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

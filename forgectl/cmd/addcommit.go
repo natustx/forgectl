@@ -29,6 +29,10 @@ func init() {
 }
 
 func runAddCommit(cmd *cobra.Command, args []string) error {
+	_, stateDir, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
