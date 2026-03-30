@@ -1,11 +1,13 @@
 # Session Initialization
 
 ## Topic of Concern
-> The scaffold initializes a session from a validated input file at a specified phase.
+> The scaffold initializes a session from a validated input file, project configuration, and a specified phase.
 
 ## Context
 
-The `init` command creates a new `forgectl-state.json` from a user-provided input file. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. The scaffold validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
+The `init` command creates a new `forgectl-state.json` from a user-provided input file and the project's `.forgectl/config`. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. The scaffold discovers the project root by walking up the directory hierarchy to find `.forgectl/`, reads the TOML config, validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
+
+All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are limited to `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
 
 Sessions can begin at any of the three phases, allowing users to skip earlier phases when inputs already exist.
 
@@ -19,7 +21,8 @@ Sessions can begin at any of the three phases, allowing users to skip earlier ph
 | spec-lifecycle | Consumes the spec queue populated during specifying init |
 | plan-production | Consumes the plan queue populated during planning init |
 | batch-implementation | Consumes the plan.json validated during implementing init |
-| state-persistence | State file schema defines the structure created here |
+| state-persistence | State file schema defines the structure created here; `session_id` stored at root |
+| activity-logging | `session_id` generated here; `[logs]` config validated here; pruning triggered here |
 
 ---
 
@@ -31,7 +34,9 @@ Sessions can begin at any of the three phases, allowing users to skip earlier ph
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `init` | `--from <path>` (required), `--batch-size N` (required), `--min-rounds N` (default 1), `--max-rounds N` (required), `--phase specifying\|planning\|implementing` (default specifying), `--guided` / `--no-guided` (default guided) | Initialize state file from validated input |
+| `init` | `--from <path>` (required), `--phase specifying\|planning\|implementing` (default specifying) | Initialize state file from validated input and project config |
+
+All other configuration is read from `.forgectl/config`.
 
 #### Spec Queue Input File (`--phase specifying`)
 
@@ -44,7 +49,7 @@ Sessions can begin at any of the three phases, allowing users to skip earlier ph
       "topic": "The optimizer clones or locates a repository and provides its path for downstream modules",
       "file": "optimizer/specs/repository-loading.md",
       "planning_sources": [
-        ".workspace/planning/optimizer/repo-snapshot-loading.md"
+        ".forge_workspace/planning/optimizer/repo-snapshot-loading.md"
       ],
       "depends_on": []
     }
@@ -70,14 +75,14 @@ No additional fields are permitted.
 {
   "plans": [
     {
-      "name": "Protocol Implementation",
+      "name": "Protocols Implementation Plan",
       "domain": "protocols",
-      "topic": "Implementation plan for WS1 and WS2 message contract specs",
-      "file": "protocols/.workspace/implementation_plan/plan.json",
+      "file": "protocols/.forge_workspace/implementation_plan/plan.json",
       "specs": [
         "protocols/ws1/specs/ws1-message-contract.md",
         "protocols/ws2/specs/ws2-message-contract.md"
       ],
+      "spec_commits": ["7cede10", "8743b1d"],
       "code_search_roots": ["api/", "optimizer/", "portal/"]
     }
   ]
@@ -89,9 +94,9 @@ No additional fields are permitted.
 | `plans` | array | yes | Ordered list of plans to generate and implement |
 | `plans[].name` | string | yes | Display name for the plan |
 | `plans[].domain` | string | yes | Domain grouping |
-| `plans[].topic` | string | yes | One-sentence topic of concern |
 | `plans[].file` | string | yes | Target path for plan.json relative to project root |
 | `plans[].specs` | string[] | yes | Spec file paths to study; may be empty array |
+| `plans[].spec_commits` | string[] | yes | Git commit hashes associated with specs for viewing diffs; may be empty array |
 | `plans[].code_search_roots` | string[] | yes | Directory roots for codebase exploration; may be empty array |
 
 No additional fields are permitted.
@@ -114,11 +119,11 @@ The scaffold exits with a non-zero code on validation failure.
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `init` called when `forgectl-state.json` already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
+| `.forgectl/` directory not found in hierarchy | Error: "No .forgectl directory found." Exit code 1. | Project root must be established |
+| `.forgectl/config` missing or unparseable | Error with parse details. Exit code 1. | Config must exist and be valid TOML |
+| Config constraint violation (e.g., eval.min_rounds > eval.max_rounds) | Error listing violations. Exit code 1. | Invalid configuration |
+| `init` called when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
 | `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | User needs to see what's wrong |
-| `--batch-size` < 1 | Error: "--batch-size must be at least 1." Exit code 1. | Invalid configuration |
-| `--min-rounds` < 1 | Error: "--min-rounds must be at least 1." Exit code 1. | At least one eval round required |
-| `--min-rounds` exceeds `--max-rounds` | Error: "--min-rounds cannot exceed --max-rounds." Exit code 1. | Invalid configuration |
 | `--phase` not one of the three values | Error: "--phase must be specifying, planning, or implementing." Exit code 1. | Invalid phase |
 
 ---
@@ -128,28 +133,43 @@ The scaffold exits with a non-zero code on validation failure.
 ### Initializing a Session
 
 #### Preconditions
-- No `forgectl-state.json` exists.
-- `--from`, `--batch-size`, `--max-rounds` are provided.
-- `--min-rounds` <= `--max-rounds`.
-- `--batch-size` >= 1, `--min-rounds` >= 1.
+- `.forgectl/` directory exists in the current directory or an ancestor.
+- `.forgectl/config` exists and contains valid TOML.
+- No state file exists at the configured `state_dir` location.
+- `--from` is provided.
 - `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`).
 
 #### Steps
-1. Read and parse the file at `--from`.
-2. Validate against the schema for the specified `--phase`.
-3. If validation fails: print errors and schema, exit code 1.
-4. If validation passes:
+1. Walk up the directory hierarchy to find `.forgectl/`. This establishes the project root.
+2. Read and parse `.forgectl/config` (TOML).
+3. Validate all config constraints (e.g., `eval.min_rounds <= eval.max_rounds` per phase, `batch >= 1`).
+4. If config validation fails: print errors, exit code 1.
+5. Read and parse the file at `--from`.
+6. Validate against the schema for the specified `--phase`.
+7. If input validation fails: print errors and schema, exit code 1.
+8. If validation passes:
+   - Generate a `session_id` (UUID v4) and store it at the state file root.
+   - Lock the effective configuration into the state file's `config` object.
    - For `--phase specifying`: create state file with phase `specifying`, state ORIENT, spec queue populated.
    - For `--phase planning`: create state file with phase `planning`, state ORIENT, plan queue populated.
    - For `--phase implementing`: validate plan.json, add `passes: "pending"` and `rounds: 0` to items, create state file with phase `implementing`, state ORIENT.
+9. If `config.logs.enabled` is true:
+   - Run log pruning (delete files exceeding `logs.retention_days` and `logs.max_files`). See activity-logging spec.
+   - Create the session log file at `~/.forgectl/logs/<phase>-<session_id_prefix>.jsonl`.
+   - Write the `init` log entry.
 
 #### Postconditions
-- State file exists with `batch_size`, `min_rounds`, `max_rounds`, `user_guided` set.
+- State file exists at the configured `state_dir` with `config` object mirroring the TOML structure.
+- `session_id` is a UUID v4 stored at the state file root.
 - Phase and state reflect the starting point.
 - For `--phase implementing`: plan.json items have `passes` and `rounds` fields.
+- If logging is enabled: log file exists and contains the init entry.
 
 #### Error Handling
-- File not found: error with path. Exit code 1.
+- `.forgectl/` not found: error. Exit code 1.
+- Config file missing or invalid TOML: error with parse details. Exit code 1.
+- Config constraint violation: error listing violations. Exit code 1.
+- Input file not found: error with path. Exit code 1.
 - Invalid JSON: error with parse details. Exit code 1.
 - Schema failure: error listing violations, print valid schema. Exit code 1.
 
@@ -157,21 +177,32 @@ The scaffold exits with a non-zero code on validation failure.
 
 ## Configuration
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `--from` | string | none (required) | Path to input file (schema varies by `--phase`) |
-| `--batch-size` | integer | none (required) | Max items per batch in implementing phase |
-| `--min-rounds` | integer | 1 | Minimum evaluation rounds per cycle. Used in all phases. |
-| `--max-rounds` | integer | none (required) | Maximum evaluation rounds per cycle. Used in all phases. |
-| `--phase` | string | specifying | Starting phase: `specifying`, `planning`, `implementing` |
-| `--guided` | boolean | true | Enable user-guided mode. Can be changed on any `advance`. |
-| `--no-guided` | boolean | — | Disable user-guided mode. |
+All configuration is read from `.forgectl/config` (TOML) and locked into the state file at init time. See `docs/configurations.md` for the full reference and `docs/default-config.toml` for the default config with comments.
+
+The `init` command accepts only two flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--from <path>` | none (required) | Path to input file (schema varies by `--phase`) |
+| `--phase` | specifying | Starting phase: `specifying`, `planning`, `implementing` |
+
+The `[logs]` section in `.forgectl/config` is validated at init:
+
+| Parameter | Type | Default | Constraint |
+|-----------|------|---------|------------|
+| `logs.enabled` | boolean | `true` | — |
+| `logs.retention_days` | integer | `90` | >= 0 |
+| `logs.max_files` | integer | `50` | >= 0 |
 
 ---
 
 ## Invariants
 
 1. **No implicit state.** All information for transitions is in the state file (and plan.json during implementing).
+2. **Config locked at init.** The state file's `config` object is the single source of truth for the session. `.forgectl/config` is not re-read after init.
+3. **Project root required.** `.forgectl/` must exist. The scaffold does not create it.
+4. **Session ID generated once.** `session_id` is a UUID v4 created at init and never changes for the lifetime of the session.
+5. **Logging is best-effort.** Log file creation failure prints a warning but does not prevent init from completing.
 
 ---
 
@@ -185,52 +216,86 @@ The scaffold exits with a non-zero code on validation failure.
   - **Expected:** Schema validation fails with specific field-level errors and the valid schema printed as reference.
   - **Rationale:** Users need to see both what's wrong and what's expected to fix the file.
 
+- **Scenario:** `.forgectl/config` has a missing section (e.g., no `[implementing]` table).
+  - **Expected:** Missing values fall back to defaults defined in `docs/default-config.toml`.
+  - **Rationale:** Partial configs are valid — only explicitly set values override defaults.
+
+- **Scenario:** `.forgectl/` found two levels up from current directory.
+  - **Expected:** Project root is the directory containing `.forgectl/`. All relative paths resolve from there.
+  - **Rationale:** The scaffold supports working from any subdirectory within the project.
+
 ---
 
 ## Testing Criteria
 
 ### Init defaults to specifying phase
 - **Verifies:** Default phase selection.
-- **When:** `forgectl init --from specs-queue.json --batch-size 2 --max-rounds 3`
+- **Given:** Valid `.forgectl/config` with defaults.
+- **When:** `forgectl init --from specs-queue.json`
 - **Then:** `phase: "specifying"`, `state: "ORIENT"`, `started_at_phase: "specifying"`.
 
 ### Init at planning phase
 - **Verifies:** Phase selection with `--phase planning`.
-- **When:** `forgectl init --phase planning --from plans-queue.json --batch-size 2 --max-rounds 3`
+- **Given:** Valid `.forgectl/config`.
+- **When:** `forgectl init --phase planning --from plans-queue.json`
 - **Then:** `phase: "planning"`, `state: "ORIENT"`. Specifying section is null.
 
 ### Init at implementing phase
 - **Verifies:** Phase selection with `--phase implementing` and plan.json mutation.
-- **When:** `forgectl init --phase implementing --from plan.json --batch-size 2 --max-rounds 3`
+- **Given:** Valid `.forgectl/config`.
+- **When:** `forgectl init --phase implementing --from plan.json`
 - **Then:** `phase: "implementing"`, `state: "ORIENT"`. plan.json items have `passes` and `rounds`.
+
+### Init rejects missing .forgectl directory
+- **Verifies:** Project root discovery failure.
+- **Given:** No `.forgectl/` in current directory or any ancestor.
+- **When:** `forgectl init --from specs-queue.json`
+- **Then:** Exit code 1.
+
+### Init rejects invalid config
+- **Verifies:** Config validation catches constraint violations.
+- **Given:** `.forgectl/config` has `specifying.eval.min_rounds = 5` and `specifying.eval.max_rounds = 2`.
+- **When:** `forgectl init --from specs-queue.json`
+- **Then:** Exit code 1.
 
 ### Init rejects existing state
 - **Verifies:** Rejection when state file already exists.
-- **Given:** State file exists.
-- **When:** `forgectl init --from specs-queue.json --batch-size 2 --max-rounds 3`
+- **Given:** State file exists at configured `state_dir`.
+- **When:** `forgectl init --from specs-queue.json`
 - **Then:** Exit code 1.
 
 ### Init rejects invalid queue
 - **Verifies:** Schema validation catches missing required fields.
 - **Given:** Spec queue missing `file` field.
-- **When:** `forgectl init --from bad-queue.json --batch-size 2 --max-rounds 3`
+- **When:** `forgectl init --from bad-queue.json`
 - **Then:** Exit code 1.
 
-### Init rejects min exceeding max
-- **Verifies:** Configuration constraint enforcement.
-- **Given:** `--min-rounds 5 --max-rounds 2`
-- **When:** `forgectl init --from specs-queue.json --batch-size 2 --min-rounds 5 --max-rounds 2`
-- **Then:** Exit code 1.
+### Init locks config into state file
+- **Verifies:** Config from `.forgectl/config` is persisted in state file.
+- **Given:** `.forgectl/config` with `specifying.batch = 5`, `implementing.eval.max_rounds = 7`.
+- **When:** `forgectl init --from specs-queue.json`
+- **Then:** State file has `config.specifying.batch: 5`, `config.implementing.eval.max_rounds: 7`.
 
-### Init rejects batch-size less than 1
-- **Verifies:** Configuration constraint enforcement.
-- **Given:** `--batch-size 0`
-- **When:** `forgectl init --from specs-queue.json --batch-size 0 --max-rounds 3`
-- **Then:** Exit code 1.
+### Init applies defaults for missing config values
+- **Verifies:** Partial config falls back to defaults.
+- **Given:** `.forgectl/config` with only `[specifying]` section, no `[implementing]`.
+- **When:** `forgectl init --from specs-queue.json`
+- **Then:** State file has `config.implementing.batch: 2`, `config.implementing.eval.min_rounds: 1`, `config.implementing.eval.max_rounds: 3`.
+
+### Init discovers project root from subdirectory
+- **Verifies:** Directory hierarchy walk.
+- **Given:** `.forgectl/` at `/project/`, current directory is `/project/api/internal/`.
+- **When:** `forgectl init --from specs-queue.json`
+- **Then:** Project root is `/project/`. State file created at `/project/.forgectl/state/`.
 
 ---
 
 ## Implements
 - Phase-selectable init (`--phase specifying|planning|implementing`)
 - Input validation for spec queue, plan queue, and plan.json schemas
-- Configuration parameters: batch_size, min_rounds, max_rounds, guided
+- Project root discovery via `.forgectl/` directory walk
+- Config read from `.forgectl/config` (TOML) with defaults
+- Phase-scoped config locked into state file at init
+- Session ID generation (UUID v4) at init
+- `[logs]` config validation and log pruning at init
+- Session log file creation at `~/.forgectl/logs/`

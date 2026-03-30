@@ -1,13 +1,21 @@
 # Spec Lifecycle
 
 ## Topic of Concern
-> The scaffold sequences individual spec drafting through iterative evaluation rounds.
+> The scaffold sequences batched spec drafting through iterative evaluation rounds, with domain-scoped cross-referencing after each domain completes.
 
 ## Context
 
-The specifying phase guides an architect through drafting, evaluating, refining, and accepting specs from a queue. Each spec is processed one at a time through a cycle of drafting, sub-agent evaluation, and refinement until accepted (or force-accepted at max rounds). Accepted specs move to the completed list and the next spec is pulled from the queue.
+The specifying phase guides an architect through drafting, evaluating, refining, and accepting specs from a queue. Specs are processed in batches of up to `specifying.batch` (default 3), grouped by domain — a batch never mixes domains. If a domain has more specs than the batch size, it produces multiple batches before moving to the next domain.
 
-This spec covers the individual spec lifecycle from ORIENT through DONE. Cross-reference reconciliation after all specs are complete is covered by spec-reconciliation.
+The eval sub-agent evaluates all specs in the batch together. The entire batch cycles through DRAFT → EVALUATE → REFINE until accepted (or force-accepted at `specifying.eval.max_rounds`). Accepted specs move to the completed list and the next batch is pulled from the queue.
+
+After the last batch for a domain is accepted, the scaffold enters a domain-scoped CROSS_REFERENCE phase. This cross-references ALL specs in the domain (session specs and existing specs) before moving to the next domain.
+
+When `enable_commits` is `false` (default), `--message` is not required at any state. When `enable_commits` is `true`, `--message` is required at EVALUATE with PASS verdict. TODO: automatic git commit execution is not yet implemented.
+
+The scaffold does not spawn sub-agents. It outputs instructions telling the architect what to spawn. The architect (or the skill driving the session) is responsible for spawning them.
+
+This spec covers the spec lifecycle from ORIENT through DONE. Cross-domain reconciliation after all specs are complete is covered by spec-reconciliation.
 
 ## Depends On
 - **state-persistence** — reads and writes the state file.
@@ -17,11 +25,12 @@ This spec covers the individual spec lifecycle from ORIENT through DONE. Cross-r
 
 | Spec | Relationship |
 |------|-------------|
-| Spec generation skill | The skill document describes the spec authoring process; the scaffold enforces the state machine that sequences it |
-| Spec generation sub-agent | The specifying EVALUATE state is where the architect spawns a sub-agent; the scaffold tracks round count, verdict, and eval report path |
+| Specs skill | The DRAFT and REFINE action outputs reference skill files (`references/spec-format.md`, `references/spec-generation-skill.md`, `references/topic-of-concern.md`) that define the authoring process; the scaffold enforces the state machine that sequences it |
+| Spec generation sub-agent | The specifying EVALUATE state is where the architect spawns a sub-agent to evaluate the batch; the scaffold tracks round count, verdict, and eval report path |
 | spec-reconciliation | Receives the completed specs list when the queue is exhausted (DONE state) |
-| commit-tracking | Completed specs receive commit hashes via add-commit and reconcile-commit |
-| Eval output directory | The specifying eval sub-agent writes output to `<project>/specs/.eval/`; the scaffold does not read these files but the convention is documented |
+| commit-tracking | Completed specs receive commit hashes (via `commit_hashes` field) through add-commit and reconcile-commit |
+| Eval output directory | The specifying eval sub-agent writes output to `<domain>/specs/.eval/`; the scaffold does not read these files but the convention is documented |
+| phase-transitions | Completed specs, commit hashes, and code search roots feed into auto-generated plan-queue at specifying→planning phase shift |
 
 ---
 
@@ -33,11 +42,35 @@ This spec covers the individual spec lifecycle from ORIENT through DONE. Cross-r
 
 | State | Flags |
 |-------|-------|
-| DRAFT | `--file <path>` (optional, override file path) |
-| EVALUATE | `--verdict PASS\|FAIL`, `--eval-report <path>` (required), `--message <text>` (required with PASS) |
+| DRAFT | (no flags) |
+| EVALUATE | `--verdict PASS\|FAIL`, `--eval-report <path>` (required), `--message <text>` (required with PASS when `enable_commits: true`) |
 | REFINE | (no flags) |
+| CROSS_REFERENCE | (no flags) |
+| CROSS_REFERENCE_EVAL | `--verdict PASS\|FAIL`, `--eval-report <path>` (required) |
+| CROSS_REFERENCE_REVIEW | (no flags) |
 
 The `--guided` / `--no-guided` flags are accepted on any `advance` call regardless of state.
+
+#### `add-queue-item` — Add spec to queue
+
+Appends a spec to the specifying queue. Only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW states within the specifying phase.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name` | yes | Display name for the spec |
+| `--domain` | at DONE only | Domain this spec belongs to. Inferred from current domain at DRAFT and CROSS_REFERENCE_REVIEW. Required at DONE (no current domain). Optional override at other states. |
+| `--topic` | yes | One-sentence topic of concern |
+| `--file` | yes | Target spec file path (relative to project root) |
+| `--source` | no | Planning source path (repeatable for multiple sources) |
+
+#### `set-roots` — Set code search roots for a domain
+
+Stores code search roots for use during the planning phase. Only valid in CROSS_REFERENCE_REVIEW or DONE states within the specifying phase.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--domain` | at DONE only | Domain to set roots for. Inferred from current domain at CROSS_REFERENCE_REVIEW. Required at DONE (no current domain). |
+| (positional) | yes | One or more directory paths |
 
 ### Outputs
 
@@ -48,28 +81,53 @@ The `--guided` / `--no-guided` flags are accepted on any `advance` call regardle
 ```
 State:   SELECT
 Phase:   specifying
-ID:      1
-Spec:    Repository Loading
 Domain:  optimizer
-File:    optimizer/specs/repository-loading.md
-Topic:   The optimizer clones or locates a repository and provides its path for downstream modules
-Sources: .workspace/planning/optimizer/repo-snapshot-loading.md
-Action:  Review topic and planning sources.
-         Stop and review and discuss with user before continuing.
-         Advance to begin drafting.
+Path:    optimizer/
+Batch:   3 specs
+Specs:
+  [1] Repository Loading
+      File:    repository-loading.md
+      Topic:   The optimizer clones or locates a repository and provides its path for downstream modules
+      Sources: .forge_workspace/planning/optimizer/repo-snapshot-loading.md
+  [2] Snapshot Diffing
+      File:    snapshot-diffing.md
+      Topic:   The optimizer compares repository snapshots to detect meaningful changes
+      Sources: .forge_workspace/planning/optimizer/snapshot-diffing.md
+  [3] Cache Invalidation
+      File:    cache-invalidation.md
+      Topic:   The optimizer invalidates cached results when upstream inputs change
+      Sources: .forge_workspace/planning/optimizer/cache-invalidation.md
+Action:  Study each planning source.
+         Study each spec doc that exists.
+         STOP please review and discuss with user before continuing.
+         After completion of the above, advance to begin drafting.
 ```
+
+Spec file paths are relative to `<domain_path>/specs/`. Planning source paths are project-root-relative.
 
 **Entering DRAFT** (after SELECT):
 
 ```
 State:   DRAFT
 Phase:   specifying
-ID:      1
-Spec:    Repository Loading
 Domain:  optimizer
-File:    optimizer/specs/repository-loading.md
-Action:  Draft the spec. Advance when ready.
-         Use --file <path> if the file path changed.
+Path:    optimizer/
+Batch:   3 specs
+Specs:
+  [1] repository-loading.md
+      Sources: .forge_workspace/planning/optimizer/repo-snapshot-loading.md
+  [2] snapshot-diffing.md
+      Sources: .forge_workspace/planning/optimizer/snapshot-diffing.md
+  [3] cache-invalidation.md
+      Sources: .forge_workspace/planning/optimizer/cache-invalidation.md
+Action:  Draft all specs in the batch using the spec skill.
+         Format:    references/spec-format.md
+         Process:   references/spec-generation-skill.md
+         Scoping:   references/topic-of-concern.md
+         If a topic needs splitting or a missing spec is identified,
+         write the new spec file, then register it:
+           forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
+         After completion of the above, advance to begin evaluation.
 ```
 
 **Entering EVALUATE** (after DRAFT or REFINE):
@@ -77,15 +135,17 @@ Action:  Draft the spec. Advance when ready.
 ```
 State:   EVALUATE
 Phase:   specifying
-ID:      1
-Spec:    Repository Loading
 Domain:  optimizer
-File:    optimizer/specs/repository-loading.md
+Path:    optimizer/
+Batch:   3 specs
 Round:   1/3
-Action:  Spawn evaluation sub-agent against the spec.
-         Eval output: optimizer/specs/.eval/repository-loading-r1.md
-         Advance with --verdict PASS --eval-report <path> --message <commit msg>
-           or --verdict FAIL --eval-report <path>
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Please spawn 1 opus sub-agent to evaluate the spec batch.
+         Eval output: optimizer/specs/.eval/batch-1-r1.md
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
 **Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds):
@@ -93,14 +153,21 @@ Action:  Spawn evaluation sub-agent against the spec.
 ```
 State:   REFINE
 Phase:   specifying
-ID:      1
-Spec:    Repository Loading
 Domain:  optimizer
-File:    optimizer/specs/repository-loading.md
+Path:    optimizer/
+Batch:   3 specs
 Round:   1/3
-Action:  Read the eval report and address any findings in the spec file.
-         Eval report: optimizer/specs/.eval/repository-loading-r1.md
-         When changes are complete, run: forgectl advance
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Read the eval report and address any findings in the spec files
+         using the spec skill.
+         Eval report: optimizer/specs/.eval/batch-1-r1.md
+         Format:      references/spec-format.md
+         Process:     references/spec-generation-skill.md
+         Scoping:     references/topic-of-concern.md
+         After completion of the above, advance to continue evaluation.
 ```
 
 **Entering ACCEPT** (after EVALUATE PASS, round >= min_rounds):
@@ -108,73 +175,192 @@ Action:  Read the eval report and address any findings in the spec file.
 ```
 State:   ACCEPT
 Phase:   specifying
-ID:      1
-Spec:    Repository Loading
 Domain:  optimizer
-File:    optimizer/specs/repository-loading.md
+Path:    optimizer/
+Batch:   3 specs accepted
 Round:   2/3
-Commit:  a1b2c3d
-Action:  Spec accepted. Advance to continue.
+Action:  Batch accepted.
+         After completion of the above, advance to continue.
 ```
 
-**Entering DONE** (after ACCEPT, queue empty — all individual specs complete):
+**Entering CROSS_REFERENCE** (after ACCEPT, domain complete):
+
+```
+State:   CROSS_REFERENCE
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+
+Specs in domain:
+  [session — completed]
+    repository-loading.md (batch 1)
+    snapshot-diffing.md (batch 1)
+    cache-invalidation.md (batch 2)
+  [existing — not in queue]
+    configuration-models.md
+    telemetry-pipeline.md
+
+Action:  Please spawn 3 haiku sub-agents to cross-reference ALL specs in this domain.
+         Assign each sub-agent a subset of specs to review against the others.
+         Fix any findings.
+         After completion of the above, advance to begin evaluation.
+```
+
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE):
+
+```
+State:   CROSS_REFERENCE_EVAL
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Round:   1/2
+Eval:    optimizer/specs/.eval/cross-reference-r1.md
+
+Action:  Please spawn 1 opus sub-agent to evaluate cross-reference consistency.
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+```
+
+**Entering CROSS_REFERENCE_REVIEW** (after first CROSS_REFERENCE_EVAL):
+
+CROSS_REFERENCE_REVIEW always fires once per domain after the first passing cross-reference eval. The action output varies based on `user_review`:
+
+When `user_review: true`:
+
+```
+State:   CROSS_REFERENCE_REVIEW
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Round:   1/2
+Verdict: PASS
+Eval:    optimizer/specs/.eval/cross-reference-r1.md
+
+Action:  STOP please review and discuss with user before continuing.
+         If additional specs are needed for this domain,
+         write the new spec file, then register it:
+           forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
+         Set code search roots for this domain (used in planning phase):
+           forgectl set-roots <path> [<path>...]
+         After completion of the above, advance to continue.
+```
+
+When `user_review: false`:
+
+```
+State:   CROSS_REFERENCE_REVIEW
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Round:   1/2
+Verdict: PASS
+Eval:    optimizer/specs/.eval/cross-reference-r1.md
+
+Action:  Domain cross-reference complete.
+         If additional specs are needed for this domain,
+         write the new spec file, then register it:
+           forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
+         Set code search roots for this domain (used in planning phase):
+           forgectl set-roots <path> [<path>...]
+         After completion of the above, advance to continue.
+```
+
+**Entering DONE** (after last domain's cross-reference complete, queue empty):
 
 ```
 State:   DONE
 Phase:   specifying
 Specs:   5 completed
-Action:  All individual specs complete. Advance to begin reconciliation.
+Action:  All individual specs complete.
+         If additional specs are needed,
+         write the new spec file, then register it:
+           forgectl add-queue-item --name <name> --domain <domain> --topic <topic> --file <file> [--source <path>...]
+           Adding specs here re-enters ORIENT for the new items before reconciliation.
+         Set code search roots for any domain not yet configured (used in planning phase):
+           forgectl set-roots --domain <domain> <path> [<path>...]
+         When ready, advance to begin reconciliation.
 ```
 
 #### Eval Report Locations
 
 Specifying eval reports follow this convention:
 ```
-<project>/specs/.eval/<spec-name>-rN.md
+<domain>/specs/.eval/batch-N-rM.md
 ```
 
-#### `status` output — Specifying section
+Cross-reference eval reports:
+```
+<domain>/specs/.eval/cross-reference-rN.md
+```
+
+#### `status` output — Specifying (compact)
+
+The compact `status` output for specifying shows the current batch, round, action, and a one-line progress summary:
 
 ```
---- Current ---
-
-State:   REFINE
-ID:      3
-Spec:    Repository Loading (optimizer)
-File:    optimizer/specs/repository-loading.md
+Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
 Round:   1/3
-Action:  Read the eval report and address any findings in the spec file.
-         Eval report: optimizer/specs/.eval/repository-loading-r1.md
-         When changes are complete, run: forgectl advance
 
+Action:  Read the eval report and address any findings in the spec files
+         using the spec skill.
+         Eval report: optimizer/specs/.eval/batch-1-r1.md
+         Format:      references/spec-format.md
+         Process:     references/spec-generation-skill.md
+         Scoping:     references/topic-of-concern.md
+         After completion of the above, advance to continue evaluation.
+
+Progress: 1/5 specs completed, 2 queued
+```
+
+#### `status --verbose` output — Specifying section
+
+With `--verbose`, the full queue, completed list with eval history, and prior phase summaries are appended:
+
+```
 --- Queue ---
 
-  [4] Snapshot Diffing (optimizer)
-  [5] Portal Rendering (portal)
+  [4] Portal Rendering (portal)
+  [5] Portal Caching (portal)
 
 --- Completed ---
 
-  [1] Configuration Models (optimizer)  — 2 rounds, commit a1b2c3d
+  [1] Configuration Models (optimizer)  — 2 rounds
        Round 1: FAIL — optimizer/specs/.eval/configuration-models-r1.md
        Round 2: PASS — optimizer/specs/.eval/configuration-models-r2.md
-  [2] API Gateway (api)                — 1 round, commit e4f5a6b
-       Round 1: PASS — api/specs/.eval/api-gateway-r1.md
 ```
 
 ### Rejection
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `advance --file` outside of specifying DRAFT | Error naming the current state. Exit code 1. | Flag is meaningless outside DRAFT |
-| `advance --verdict` outside of EVALUATE | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
+| `advance --verdict` outside of EVALUATE, CROSS_REFERENCE_EVAL | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
 | `advance` in specifying EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
 | `advance` in specifying EVALUATE without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
-| `advance --verdict PASS` in specifying EVALUATE without `--message` | Error. Exit code 1. | Accepted specs need a commit message |
+| `advance --verdict PASS` without `--message` when `enable_commits: true` | Error. Exit code 1. | Accepted specs need a commit message when commits are enabled |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
+| `advance` in CROSS_REFERENCE_EVAL without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
+| `advance` in CROSS_REFERENCE_EVAL without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
+| `add-queue-item` outside of DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW | Error: "add-queue-item is only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW states (current state: \<state\>)." Exit code 1. | Queue modifications are restricted to states where the architect has sufficient context to identify gaps |
+| `add-queue-item` outside of specifying phase | Error: "add-queue-item is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Queue items are specs; only the specifying phase manages the spec queue |
+| `add-queue-item` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
+| `add-queue-item` with `--file` pointing to non-existent file | Error: "file \<path\> does not exist. add-queue-item registers specs that have already been written. Create the spec file first, then register it." Exit code 1. | The architect must write the spec before registering it; `add-queue-item` is for tracking existing work through evaluation, not queuing future work |
+| `set-roots` outside of CROSS_REFERENCE_REVIEW or DONE | Error: "set-roots is only valid in CROSS_REFERENCE_REVIEW or DONE states (current state: \<state\>)." Exit code 1. | Code search roots are collected at domain completion boundaries |
+| `set-roots` outside of specifying phase | Error: "set-roots is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Code search roots feed into the planning phase via the specifying→planning phase shift |
+| `set-roots` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
 
 ---
 
 ## Behavior
+
+### Batch Selection
+
+At ORIENT, the scaffold selects up to `specifying.batch` specs from the front of the queue, all from the same domain. Specs are pulled in queue order. Domain boundaries are batch boundaries — the batch ends when the domain changes or the batch size is reached.
+
+### Domain Path
+
+Each spec in the queue includes a `domain_path` — the filesystem path to the domain directory (e.g., `optimizer/`). The scaffold uses this to:
+- Display shorter spec file paths (relative to `<domain_path>/specs/`)
+- Discover all `.md` files in `<domain_path>/specs/` for cross-referencing
+- The state file stores spec filenames only (e.g., `repository-loading.md`), not full paths. Full paths are reconstructed as `<domain_path>/specs/<filename>`.
 
 ### State Machine
 
@@ -190,66 +376,194 @@ ORIENT → SELECT → DRAFT → EVALUATE
                     │         │          │
               ┌─────┘         └────┬─────┘
               │                    │
-         queue empty?         EVALUATE
+         domain done?          EVALUATE
+           yes → CROSS_REFERENCE
+           no → ORIENT            FAIL ≥ max → ACCEPT (forced)
+
+CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+                        │
+              ┌─────────┼──────────────────┐
+              │         │                  │
+        PASS ≥ min   PASS < min       FAIL < max
+              │         │                  │
+              ▼         ▼                  ▼
+         (continue)  CROSS_REFERENCE    CROSS_REFERENCE
+              │
+         queue empty?        FAIL ≥ max → (continue, forced)
            yes → DONE
            no → ORIENT
-                              FAIL ≥ max → ACCEPT (forced)
+
+(continue) = CROSS_REFERENCE_REVIEW if round == 1 (always, regardless of user_review),
+             otherwise next domain or DONE
 ```
 
 ### Transition Table
 
 | From State | Condition | To State | Side Effects |
 |------------|-----------|----------|-------------|
-| ORIENT | always | SELECT | Pull next from queue into `current_spec` |
+| ORIENT | always | SELECT | Pull next batch from queue into `current_specs`. Batch grouped by domain, up to `specifying.batch`. |
 | SELECT | always | DRAFT | — |
-| DRAFT | always | EVALUATE | If `--file` provided, override file path. Set round to 1. |
-| EVALUATE | `--verdict PASS`, round >= `min_rounds` | ACCEPT | Record eval (PASS + eval report). Auto-commit with `--message`. |
-| EVALUATE | `--verdict PASS`, round < `min_rounds` | REFINE | Record eval (PASS + eval report). Min rounds not met. |
-| EVALUATE | `--verdict FAIL`, round < `max_rounds` | REFINE | Record eval (FAIL + eval report). |
-| EVALUATE | `--verdict FAIL`, round >= `max_rounds` | ACCEPT | Record eval (FAIL + eval report). Forced acceptance. |
+| DRAFT | always | EVALUATE | Set round to 1. |
+| EVALUATE | `--verdict PASS`, round >= `specifying.eval.min_rounds` | ACCEPT | Record eval. TODO: Auto-commit with `--message` when `enable_commits: true` (not yet implemented). |
+| EVALUATE | `--verdict PASS`, round < `specifying.eval.min_rounds` | REFINE | Record eval (PASS + eval report). Min rounds not met. |
+| EVALUATE | `--verdict FAIL`, round < `specifying.eval.max_rounds` | REFINE | Record eval (FAIL + eval report). |
+| EVALUATE | `--verdict FAIL`, round >= `specifying.eval.max_rounds` | ACCEPT | Record eval (FAIL + eval report). Forced acceptance. |
 | REFINE | always | EVALUATE | Increment round. |
-| ACCEPT | queue non-empty | ORIENT | Move spec to completed (with eval history + commit hash). |
-| ACCEPT | queue empty | DONE | Move spec to completed. |
+| ACCEPT | domain has more batches in queue | ORIENT | Move batch specs to completed (with eval history + commit hashes). |
+| ACCEPT | domain complete, queue non-empty | CROSS_REFERENCE | Move batch specs to completed. Begin domain cross-referencing. |
+| ACCEPT | domain complete, queue empty | CROSS_REFERENCE | Move batch specs to completed. Begin domain cross-referencing. |
+| CROSS_REFERENCE | always | CROSS_REFERENCE_EVAL | Set cross-reference round to 1 (first entry) or increment round. |
+| CROSS_REFERENCE_EVAL | `--verdict PASS`, round >= `specifying.cross_reference.min_rounds`, round == 1 | CROSS_REFERENCE_REVIEW | Record eval. Always enters CROSS_REFERENCE_REVIEW on first passing eval (regardless of `user_review`). |
+| CROSS_REFERENCE_EVAL | `--verdict PASS`, round >= `specifying.cross_reference.min_rounds`, round > 1 | ORIENT or DONE | Record eval. If queue non-empty: ORIENT. Else: DONE. |
+| CROSS_REFERENCE_EVAL | `--verdict PASS`, round < `specifying.cross_reference.min_rounds` | CROSS_REFERENCE | Record eval. Min rounds not met. |
+| CROSS_REFERENCE_EVAL | `--verdict FAIL`, round < `specifying.cross_reference.max_rounds` | CROSS_REFERENCE | Record eval. |
+| CROSS_REFERENCE_EVAL | `--verdict FAIL`, round >= `specifying.cross_reference.max_rounds` | ORIENT or DONE | Record eval. Forced acceptance. If queue non-empty: ORIENT. Else: DONE. |
+| CROSS_REFERENCE_REVIEW | always | ORIENT or DONE | If queue non-empty: ORIENT. Else: DONE. |
+| DONE | queue non-empty (via add-queue-item) | ORIENT | Pull next batch from queue. Re-enters drafting loop. |
+| DONE | queue empty | RECONCILE | Begin cross-domain reconciliation (see spec-reconciliation). |
 
 ### Eval Output Convention
 
 The specifying evaluation sub-agent writes structured markdown to a known directory:
 
 ```
-<project>/specs/.eval/
-├── <spec-name>-r1.md
-├── <spec-name>-r2.md
+<domain>/specs/.eval/
+├── batch-1-r1.md
+├── batch-1-r2.md
+├── cross-reference-r1.md
+├── cross-reference-r2.md
 └── ...
 ```
 
-The scaffold does not read or write these files. This is a convention for the architect and sub-agent.
+The scaffold does not read or write these files. This is a convention for the architect and sub-agent. The eval sub-agent evaluates all specs in the batch together in a single report.
+
+### Add Queue Item
+
+`forgectl add-queue-item` appends a spec to the end of the specifying queue. It does not affect the current batch.
+
+1. Validate the current phase is `specifying`.
+2. Validate the current state is DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW.
+3. Validate all required flags: `--name`, `--topic`, `--file`.
+4. Validate `--file` points to an existing file. If not: error with message instructing the architect to create the file first.
+5. Resolve domain: if `--domain` is provided, use it. Otherwise, infer from the current domain (current batch domain at DRAFT, cross-reference domain at CROSS_REFERENCE_REVIEW). At DONE, `--domain` is required (no current domain).
+6. Derive `domain_path` from the `--file` path (the directory two levels up from the file, e.g., `optimizer/specs/cache-eviction.md` → `optimizer/`). If the domain already exists in completed specs or queue, verify the derived `domain_path` matches.
+7. Validate `--name` is unique across both the queue and completed specs.
+8. Append the new entry to the end of `specifying.queue`.
+9. Write the state file.
+10. Print confirmation: spec name, domain, domain_path, and queue position.
+
+When `add-queue-item` is used at DONE and the queue was previously empty, advancing from DONE re-enters ORIENT for the new items. After those items complete (including their domain's cross-reference), the scaffold returns to DONE. Reconciliation does not begin until the queue is empty again.
+
+### Set Roots
+
+`forgectl set-roots` stores code search roots for a domain. These roots are used during plan-queue generation at the specifying→planning phase shift.
+
+1. Validate the current phase is `specifying`.
+2. Validate the current state is CROSS_REFERENCE_REVIEW or DONE.
+3. Resolve domain: if `--domain` is provided, use it. Otherwise, infer from the current cross-reference domain at CROSS_REFERENCE_REVIEW. At DONE, `--domain` is required (no current domain).
+4. Validate the resolved domain has completed specs.
+5. Validate at least one positional path argument is provided.
+6. Store the roots in `specifying.domains[<domain>].code_search_roots`.
+7. Write the state file.
+8. Print confirmation: domain and roots.
+
+Calling `set-roots` for a domain that already has roots overwrites the previous value.
 
 ---
 
 ## Invariants
 
-1. **Single active spec.** At most one spec in `current_spec` at any time.
+1. **Batch is domain-homogeneous.** All specs in a batch share the same domain.
 2. **Round monotonicity.** The specifying round counter only increments.
 3. **Queue order preserved.** Specs are pulled from the front of the queue.
-4. **Min rounds enforced.** PASS below `min_rounds` forces another cycle.
-5. **Max rounds enforced.** FAIL at `max_rounds` forces acceptance.
-6. **Guided pauses.** When `user_guided` is true, SELECT output includes "Stop and review and discuss with user before continuing."
+4. **Min rounds enforced.** PASS below `specifying.eval.min_rounds` forces another cycle.
+5. **Max rounds enforced.** FAIL at `specifying.eval.max_rounds` forces acceptance.
+6. **Guided pauses.** When `config.general.user_guided` is true, SELECT output includes "STOP please review and discuss with user before continuing."
+7. **Commit gating.** `--message` is only required when `enable_commits` is `true`.
+8. **Domain cross-reference required.** Every domain passes through CROSS_REFERENCE before the next domain begins or DONE is reached.
+9. **Cross-reference scans all domain specs.** CROSS_REFERENCE discovers all `.md` files in `<domain_path>/specs/`, not just session specs.
+10. **Domain checkpoint fires once.** CROSS_REFERENCE_REVIEW is entered exactly once per domain (after the first passing CROSS_REFERENCE_EVAL), regardless of `user_review` setting.
+11. **user_review controls output, not state entry.** When `user_review` is true, the CROSS_REFERENCE_REVIEW action includes "STOP please review and discuss with user before continuing." When false, it says "Domain cross-reference complete." The state is entered either way.
+12. **add-queue-item is state-gated.** Only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW within the specifying phase.
+13. **set-roots is state-gated.** Only valid in CROSS_REFERENCE_REVIEW or DONE within the specifying phase.
+14. **add-queue-item names are unique.** No duplicate names across queue and completed specs.
+15. **DONE re-enters ORIENT when queue is non-empty.** If `add-queue-item` populates the queue at DONE, advancing re-enters ORIENT instead of RECONCILE.
 
 ---
 
 ## Edge Cases
 
-- **Scenario:** `advance --verdict FAIL` when round < `max_rounds`.
+- **Scenario:** `advance --verdict FAIL` when round < `specifying.eval.max_rounds`.
   - **Expected:** REFINE.
   - **Rationale:** More evaluation rounds remain; the architect gets another chance to address deficiencies.
 
-- **Scenario:** `advance --verdict FAIL` when round >= `max_rounds`.
+- **Scenario:** `advance --verdict FAIL` when round >= `specifying.eval.max_rounds`.
   - **Expected:** ACCEPT (forced).
-  - **Rationale:** The maximum rounds are exhausted. The spec is accepted as-is to prevent indefinite loops.
+  - **Rationale:** The maximum rounds are exhausted. The batch is accepted as-is to prevent indefinite loops.
 
-- **Scenario:** `advance --verdict PASS` when round < `min_rounds`.
+- **Scenario:** `advance --verdict PASS` when round < `specifying.eval.min_rounds`.
   - **Expected:** REFINE (min rounds not met).
   - **Rationale:** Even with a passing verdict, minimum evaluation rounds must be completed to ensure sufficient review.
+
+- **Scenario:** Domain has fewer specs remaining than `specifying.batch`.
+  - **Expected:** Batch contains all remaining specs for that domain.
+  - **Rationale:** Batches are capped at `specifying.batch` but may be smaller. No padding occurs.
+
+- **Scenario:** `enable_commits` is `false` and architect provides `--message` at EVALUATE PASS.
+  - **Expected:** `--message` is ignored. No error.
+  - **Rationale:** The flag is optional when commits are disabled.
+
+- **Scenario:** Domain has no existing specs outside the queue (all specs are new).
+  - **Expected:** CROSS_REFERENCE lists only session specs under `[session — completed]`. `[existing — not in queue]` section is empty or omitted.
+  - **Rationale:** Cross-referencing still runs to verify consistency among the new specs.
+
+- **Scenario:** CROSS_REFERENCE_EVAL FAIL at `specifying.cross_reference.max_rounds`.
+  - **Expected:** Forced acceptance. Advance to next domain (ORIENT) or DONE.
+  - **Rationale:** Maximum cross-reference rounds exhausted. Prevents indefinite loops.
+
+- **Scenario:** First CROSS_REFERENCE_EVAL passes, `user_review` is true.
+  - **Expected:** CROSS_REFERENCE_REVIEW with "STOP please review and discuss with user before continuing." in action output.
+  - **Rationale:** Domain checkpoint always fires. `user_review` adds the review prompt.
+
+- **Scenario:** First CROSS_REFERENCE_EVAL passes, `user_review` is false.
+  - **Expected:** CROSS_REFERENCE_REVIEW with "Domain cross-reference complete." in action output. No user review prompt.
+  - **Rationale:** Domain checkpoint always fires for set-roots and add-queue-item collection. `user_review` only controls the review prompt.
+
+- **Scenario:** `add-queue-item` called during EVALUATE.
+  - **Expected:** Error: "add-queue-item is only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW states (current state: EVALUATE)." Exit code 1.
+  - **Rationale:** Queue modifications are restricted to states where the architect is the actor with sufficient context.
+
+- **Scenario:** `add-queue-item` with a name that already exists in the queue.
+  - **Expected:** Error: "spec name '<name>' already exists in queue." Exit code 1.
+  - **Rationale:** Duplicate names create ambiguity in status output, depends_on references, and completed specs tracking.
+
+- **Scenario:** `add-queue-item` called at DONE when queue is empty, then advance.
+  - **Expected:** Advance re-enters ORIENT. The new spec is pulled into a batch. After acceptance and cross-reference, returns to DONE.
+  - **Rationale:** DONE only advances to RECONCILE when the queue is empty. Adding items re-opens the drafting loop.
+
+- **Scenario:** `add-queue-item` called during DRAFT for a different domain than the current batch.
+  - **Expected:** Item appended to queue. Current batch continues unaffected. The new item is processed when its domain comes up in queue order.
+  - **Rationale:** Queue append does not disturb the current batch.
+
+- **Scenario:** `add-queue-item` with `--file` pointing to a file that does not exist.
+  - **Expected:** Error: "file <path> does not exist. add-queue-item registers specs that have already been written. Create the spec file first, then register it." Exit code 1.
+  - **Rationale:** `add-queue-item` is for registering existing work, not queuing future work. The architect must write the spec before registering it.
+
+- **Scenario:** `add-queue-item` with `--file` whose derived `domain_path` conflicts with an existing domain's path.
+  - **Expected:** Error naming the conflict. Exit code 1.
+  - **Rationale:** Prevents silent domain_path mismatches that would break cross-referencing and file discovery.
+
+- **Scenario:** `set-roots` called for a domain with no completed specs.
+  - **Expected:** Error: "domain '<domain>' has no completed specs." Exit code 1.
+  - **Rationale:** Roots are collected for domains that have been specified. Setting roots for an unknown domain is likely a typo.
+
+- **Scenario:** `set-roots` called twice for the same domain.
+  - **Expected:** Second call overwrites the first. No error.
+  - **Rationale:** The architect may refine their understanding of code locations.
+
+- **Scenario:** Phase shift to planning with no `set-roots` called for a domain.
+  - **Expected:** `code_search_roots` defaults to `["<domain>/"]` in the generated plan-queue entry.
+  - **Rationale:** The domain directory itself is the most common search root. Explicit roots override the default.
 
 ---
 
@@ -261,45 +575,199 @@ The scaffold does not read or write these files. This is a convention for the ar
 - **When:** advance through SELECT → DRAFT → EVALUATE.
 - **Then:** Each transitions in order.
 
+### ORIENT selects batch by domain
+- **Verifies:** Batch selection groups by domain up to specifying.batch.
+- **Given:** Queue has 5 optimizer specs, `specifying.batch = 3`.
+- **When:** advance from ORIENT.
+- **Then:** `current_specs` has 3 optimizer specs. 2 remain in queue.
+
+### Domain boundary ends batch
+- **Verifies:** Batch never mixes domains.
+- **Given:** Queue has 2 optimizer specs then 3 portal specs, `specifying.batch = 3`.
+- **When:** advance from ORIENT.
+- **Then:** `current_specs` has 2 optimizer specs (not 3).
+
 ### FAIL below max_rounds goes to REFINE
 - **Verifies:** FAIL verdict with remaining rounds triggers refinement.
-- **Given:** EVALUATE, max_rounds: 3, round 1.
-- **When:** `advance --verdict FAIL --eval-report .eval/spec-r1.md`
+- **Given:** EVALUATE, `specifying.eval.max_rounds: 3`, round 1.
+- **When:** `advance --verdict FAIL --eval-report .eval/batch-1-r1.md`
 - **Then:** State is REFINE.
 
 ### FAIL at max_rounds forces ACCEPT
 - **Verifies:** FAIL verdict at max rounds forces acceptance.
-- **Given:** EVALUATE, max_rounds: 2, round 2.
-- **When:** `advance --verdict FAIL --eval-report .eval/spec-r2.md`
+- **Given:** EVALUATE, `specifying.eval.max_rounds: 2`, round 2.
+- **When:** `advance --verdict FAIL --eval-report .eval/batch-1-r2.md`
 - **Then:** State is ACCEPT (forced).
 
 ### PASS below min_rounds goes to REFINE
 - **Verifies:** PASS verdict below min rounds requires more evaluation.
-- **Given:** EVALUATE, min_rounds: 2, round 1.
-- **When:** `advance --verdict PASS --eval-report .eval/spec-r1.md`
+- **Given:** EVALUATE, `specifying.eval.min_rounds: 2`, round 1.
+- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md`
 - **Then:** State is REFINE.
 
 ### PASS at min_rounds goes to ACCEPT
-- **Verifies:** PASS verdict at min rounds triggers acceptance with commit.
-- **Given:** EVALUATE, min_rounds: 2, round 2.
-- **When:** `advance --verdict PASS --eval-report .eval/spec-r2.md --message "Add spec"`
-- **Then:** State is ACCEPT. Commit created.
+- **Verifies:** PASS verdict at min rounds triggers acceptance.
+- **Given:** EVALUATE, `specifying.eval.min_rounds: 1`, round 1.
+- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md`
+- **Then:** State is ACCEPT.
 
-### PASS requires message
-- **Verifies:** PASS verdict rejection without commit message.
-- **Given:** EVALUATE.
-- **When:** `advance --verdict PASS --eval-report .eval/spec-r1.md` without `--message`
+### PASS without message when enable_commits is false
+- **Verifies:** No commit message required when commits disabled.
+- **Given:** EVALUATE, `enable_commits: false`.
+- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md` (no `--message`)
+- **Then:** State is ACCEPT. No error.
+
+### PASS without message when enable_commits is true
+- **Verifies:** Commit message required when commits enabled.
+- **Given:** EVALUATE, `enable_commits: true`.
+- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md` (no `--message`)
 - **Then:** Exit code 1.
+
+### ACCEPT triggers CROSS_REFERENCE when domain complete
+- **Verifies:** Domain completion enters cross-reference before next domain.
+- **Given:** ACCEPT, last batch for optimizer domain. Queue has portal specs remaining.
+- **When:** `advance`
+- **Then:** State is CROSS_REFERENCE. Domain is optimizer.
+
+### ACCEPT triggers ORIENT when domain has more batches
+- **Verifies:** Intra-domain batching continues without cross-reference.
+- **Given:** ACCEPT, optimizer domain has 2 more specs in queue.
+- **When:** `advance`
+- **Then:** State is ORIENT.
+
+### CROSS_REFERENCE lists all domain specs
+- **Verifies:** Cross-reference discovers session and existing specs.
+- **Given:** CROSS_REFERENCE for optimizer. Session completed 3 specs. `optimizer/specs/` also contains 2 existing specs not in queue.
+- **When:** `status`
+- **Then:** Output shows 3 session specs and 2 existing specs.
+
+### CROSS_REFERENCE_EVAL PASS advances to next domain
+- **Verifies:** Successful cross-reference continues to next domain.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.min_rounds: 1`, round 1. Queue has portal specs.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is ORIENT. Next batch is from portal domain.
+
+### CROSS_REFERENCE_EVAL FAIL below max retries
+- **Verifies:** Failed cross-reference loops back.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.max_rounds: 2`, round 1.
+- **When:** `advance --verdict FAIL --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE.
+
+### CROSS_REFERENCE_EVAL FAIL at max forces acceptance
+- **Verifies:** Max rounds forces cross-reference acceptance.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.max_rounds: 2`, round 2.
+- **When:** `advance --verdict FAIL --eval-report .eval/cross-reference-r2.md`
+- **Then:** State is ORIENT (or DONE if queue empty). Forced acceptance.
+
+### CROSS_REFERENCE_REVIEW fires on first pass with user_review true
+- **Verifies:** Domain checkpoint with user review prompt.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.user_review: true`, round 1, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE_REVIEW. Action includes "STOP please review and discuss with user before continuing."
+
+### CROSS_REFERENCE_REVIEW fires on first pass with user_review false
+- **Verifies:** Domain checkpoint fires regardless of user_review.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.user_review: false`, round 1, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE_REVIEW. Action includes "Domain cross-reference complete." No user review prompt.
+
+### CROSS_REFERENCE_REVIEW does not fire on subsequent rounds
+- **Verifies:** Domain checkpoint only fires once per domain.
+- **Given:** CROSS_REFERENCE_EVAL, round 2, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r2.md`
+- **Then:** State is ORIENT or DONE (not CROSS_REFERENCE_REVIEW).
 
 ### DONE transitions to reconciliation
 - **Verifies:** Queue exhaustion triggers reconciliation phase.
-- **Given:** All specs accepted, state is DONE.
+- **Given:** All specs accepted, all domains cross-referenced, state is DONE. Queue is empty.
 - **When:** `advance`
 - **Then:** State is RECONCILE (see spec-reconciliation).
+
+### add-queue-item at DRAFT appends to queue
+- **Verifies:** Queue append during drafting.
+- **Given:** DRAFT. Queue has 2 items.
+- **When:** `add-queue-item --name "New Spec" --domain optimizer --topic "..." --file optimizer/specs/new-spec.md`
+- **Then:** Queue has 3 items. Current batch unchanged. State remains DRAFT.
+
+### add-queue-item rejects non-existent file
+- **Verifies:** File existence validation.
+- **Given:** DRAFT. File `optimizer/specs/does-not-exist.md` does not exist.
+- **When:** `add-queue-item --name "Ghost Spec" --topic "..." --file optimizer/specs/does-not-exist.md`
+- **Then:** Exit code 1. Error instructs architect to create the file first.
+
+### add-queue-item derives domain_path from file
+- **Verifies:** domain_path derivation from --file path.
+- **Given:** DRAFT. File `optimizer/specs/cache-eviction.md` exists. Domain optimizer already has domain_path `optimizer/`.
+- **When:** `add-queue-item --name "Cache Eviction" --topic "..." --file optimizer/specs/cache-eviction.md`
+- **Then:** Queue entry has domain_path `optimizer/`. Matches existing domain.
+
+### add-queue-item rejected outside valid states
+- **Verifies:** State gate enforcement.
+- **Given:** EVALUATE.
+- **When:** `add-queue-item --name "New Spec" --domain optimizer --topic "..." --file optimizer/specs/new-spec.md`
+- **Then:** Exit code 1. Error names current state.
+
+### add-queue-item rejected outside specifying phase
+- **Verifies:** Phase gate enforcement.
+- **Given:** Planning phase, any state.
+- **When:** `add-queue-item --name "New Spec" --domain optimizer --topic "..." --file optimizer/specs/new-spec.md`
+- **Then:** Exit code 1. Error names current phase.
+
+### add-queue-item rejects duplicate names
+- **Verifies:** Name uniqueness across queue and completed.
+- **Given:** DRAFT. Completed spec named "Repository Loading".
+- **When:** `add-queue-item --name "Repository Loading" --domain optimizer --topic "..." --file optimizer/specs/repo-loading-v2.md`
+- **Then:** Exit code 1. Error names the duplicate.
+
+### add-queue-item at DONE re-enters ORIENT
+- **Verifies:** Adding items at DONE reopens the drafting loop.
+- **Given:** DONE, queue empty.
+- **When:** `add-queue-item --name "New Spec" --domain portal --topic "..." --file portal/specs/new-spec.md`, then `advance`.
+- **Then:** State is ORIENT. New spec is pulled into batch.
+
+### DONE with non-empty queue re-enters ORIENT instead of RECONCILE
+- **Verifies:** DONE only advances to RECONCILE when queue is empty.
+- **Given:** DONE, queue has 1 item (added via add-queue-item).
+- **When:** `advance`
+- **Then:** State is ORIENT (not RECONCILE).
+
+### set-roots stores roots per domain
+- **Verifies:** Root storage in state file.
+- **Given:** CROSS_REFERENCE_REVIEW, domain is optimizer.
+- **When:** `set-roots --domain optimizer optimizer/ lib/shared/`
+- **Then:** `specifying.domains["optimizer"].code_search_roots` is `["optimizer/", "lib/shared/"]`.
+
+### set-roots rejected outside valid states
+- **Verifies:** State gate enforcement.
+- **Given:** DRAFT.
+- **When:** `set-roots --domain optimizer optimizer/`
+- **Then:** Exit code 1. Error names current state.
+
+### set-roots overwrites previous value
+- **Verifies:** Idempotent overwrite.
+- **Given:** CROSS_REFERENCE_REVIEW. Domain optimizer already has roots `["optimizer/"]`.
+- **When:** `set-roots --domain optimizer optimizer/ lib/shared/`
+- **Then:** Roots updated to `["optimizer/", "lib/shared/"]`.
+
+### set-roots rejects unknown domain
+- **Verifies:** Domain must have completed specs.
+- **Given:** DONE. No completed specs for domain "unknown".
+- **When:** `set-roots --domain unknown unknown/`
+- **Then:** Exit code 1. Error names the domain.
 
 ---
 
 ## Implements
-- Specifying phase: queue-driven spec drafting with eval/refine loop
-- Single active spec with sequential queue processing
-- Eval round enforcement (min/max) with forced acceptance
+- Specifying phase: queue-driven batched spec drafting with eval/refine loop
+- Domain-grouped batch selection up to `specifying.batch`
+- Domain path for shorter spec file paths and domain-scoped discovery
+- Eval sub-agent evaluates full batch together
+- Eval round enforcement (`specifying.eval.min_rounds`/`max_rounds`) with forced acceptance
+- Domain-scoped CROSS_REFERENCE after each domain completes
+- Cross-reference discovers all `.md` files in `<domain_path>/specs/`
+- Cross-reference eval round enforcement (`specifying.cross_reference.min_rounds`/`max_rounds`)
+- Configurable CROSS_REFERENCE_REVIEW pause (`specifying.cross_reference.user_review`)
+- Commit gating via `enable_commits` configuration
+- `add-queue-item`: state-gated queue append (DRAFT, CROSS_REFERENCE_REVIEW, DONE)
+- `set-roots`: state-gated code search root collection per domain (CROSS_REFERENCE_REVIEW, DONE)
+- DONE re-enters ORIENT when queue is non-empty (supports late-added specs before reconciliation)
