@@ -35,10 +35,10 @@ Each phase shift has distinct mechanics: specifying→planning requires a new in
 
 | Phase Shift | Flags |
 |-------------|-------|
-| specifying → planning | `--from <path>` (required, plan queue JSON) |
+| specifying → planning | `--from <path>` (optional, plan queue JSON override). If omitted, forgectl auto-generates the plan queue from completed specs. |
 | planning → implementing | (no additional flags) |
 
-The `--guided` / `--no-guided` flags are accepted at phase shifts and update `user_guided` before the transition proceeds.
+The `--guided` / `--no-guided` flags are accepted at phase shifts and update `config.general.user_guided` before the transition proceeds.
 
 ### Outputs
 
@@ -50,8 +50,15 @@ The `--guided` / `--no-guided` flags are accepted at phase shifts and update `us
 State:   PHASE_SHIFT
 From:    specifying → planning
 
+Domains:  2 (optimizer, portal)
+Specs:    5 completed
+Roots:    optimizer → optimizer/, lib/shared/
+          portal → portal/ (default)
+
 Stop and refresh your context, please.
-When ready, run: forgectl advance --from <plans-queue.json>
+When ready, run:
+  forgectl advance                          # auto-generate plan queue from completed specs
+  forgectl advance --from <plan-queue.json> # OR provide a custom plan queue
 ```
 
 **Entering PHASE_SHIFT** (planning → implementing):
@@ -61,7 +68,7 @@ State:   PHASE_SHIFT
 From:    planning → implementing
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.workspace/implementation_plan/plan.json
+File:    launcher/.forge_workspace/implementation_plan/plan.json
 
 Stop and refresh your context, please.
 When ready, run: forgectl advance
@@ -71,7 +78,7 @@ When ready, run: forgectl advance
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `advance` at PHASE_SHIFT (specifying→planning) without `--from` | Error: "--from <plans-queue.json> is required at this phase shift." Exit code 1. | Planning queue must be provided |
+| `advance` at PHASE_SHIFT (specifying→planning) with `--from` pointing to invalid plan queue | Validation errors printed. State remains PHASE_SHIFT. Exit code 1. | Override file must be valid |
 
 ---
 
@@ -83,16 +90,32 @@ When ready, run: forgectl advance
 When the architect advances from COMPLETE (spec-reconciliation), the scaffold transitions to PHASE_SHIFT. No work is done — the scaffold prints the phase shift message and waits.
 
 #### Advancing from PHASE_SHIFT
-The user must provide `--from <plans-queue.json>` with a plan queue input file.
 
-1. Read and validate the plans queue at `--from`.
-2. If validation fails: print errors. State remains PHASE_SHIFT.
-3. If validation passes:
+If `--from` is provided, use the external plan queue file (override mode). If `--from` is omitted, auto-generate the plan queue from the specifying phase data.
+
+**Auto-generation (no `--from`):**
+
+1. Group completed specs by domain.
+2. For each domain, produce a plan entry:
+   - `name`: `"<Domain> Implementation Plan"` (domain name capitalized).
+   - `domain`: the domain name.
+   - `file`: `<domain>/.forge_workspace/implementation_plan/plan.json`.
+   - `specs`: all completed spec file paths for this domain.
+   - `spec_commits`: deduplicated list of all `commit_hashes` from the domain's completed specs.
+   - `code_search_roots`: from `specifying.domains[<domain>].code_search_roots` if set via `set-roots`, otherwise `["<domain>/"]`.
+3. Validate the generated plan queue (same checks as external input).
+4. If validation passes:
    - Populate the plans queue in state.
    - Set `phase` to `"planning"`.
    - Set `state` to `ORIENT`.
    - Pull first plan from queue.
    - Print the ORIENT action description.
+
+**Override mode (`--from` provided):**
+
+1. Read and validate the plans queue at `--from`.
+2. If validation fails: print errors. State remains PHASE_SHIFT.
+3. If validation passes: same steps as auto-generation step 4.
 
 ### Planning → Implementing
 
@@ -117,19 +140,27 @@ No `--from` needed — the plan.json path is already known from `current_plan.fi
 ## Invariants
 
 1. **Phase shifts are explicit.** The scaffold always stops at PHASE_SHIFT between phases. It never transitions directly across phase boundaries.
-2. **specifying→planning requires input.** `--from` with a plans queue is required at this phase shift.
+2. **specifying→planning has input.** The plan queue is either auto-generated from completed specs or provided via `--from` override.
 3. **planning→implementing validates.** plan.json is validated and mutated on advance out of PHASE_SHIFT.
-4. **Guided setting is mutable.** `--guided` / `--no-guided` can change `user_guided` on any advance call, including at phase shifts.
+4. **Guided setting is mutable.** `--guided` / `--no-guided` can change `config.general.user_guided` on any advance call, including at phase shifts.
 
 ---
 
 ## Edge Cases
 
 - **Scenario:** Advance from specifying→planning PHASE_SHIFT without `--from`.
-  - **Expected:** Error. State remains PHASE_SHIFT.
-  - **Rationale:** The planning phase requires a plans queue; the scaffold cannot proceed without input.
+  - **Expected:** Plan queue auto-generated from completed specs. Phase transitions to planning.
+  - **Rationale:** Completed specs, commit hashes, and code search roots provide all data needed to generate the plan queue.
 
-- **Scenario:** Advance from specifying→planning PHASE_SHIFT with invalid plans queue.
+- **Scenario:** Advance from specifying→planning PHASE_SHIFT without `--from`, domain has no `set-roots`.
+  - **Expected:** `code_search_roots` defaults to `["<domain>/"]` for that domain.
+  - **Rationale:** The domain directory itself is the most common search root.
+
+- **Scenario:** Advance from specifying→planning PHASE_SHIFT with `--from` override.
+  - **Expected:** External file used instead of auto-generation. Validated and consumed.
+  - **Rationale:** Override allows custom plan queue when auto-generation doesn't match needs.
+
+- **Scenario:** Advance from specifying→planning PHASE_SHIFT with invalid plans queue (`--from`).
   - **Expected:** Validation errors printed. State remains PHASE_SHIFT.
   - **Rationale:** Invalid input is rejected at the boundary rather than allowing a corrupt queue into the planning phase.
 
@@ -138,26 +169,32 @@ No `--from` needed — the plan.json path is already known from `current_plan.fi
   - **Rationale:** The implementing phase requires a structurally valid plan; errors caught here prevent failures during batch selection.
 
 - **Scenario:** `--guided` provided at PHASE_SHIFT advance.
-  - **Expected:** `user_guided` updated before the phase transition proceeds.
+  - **Expected:** `config.general.user_guided` updated before the phase transition proceeds.
   - **Rationale:** The guided setting is mutable on any advance, including phase shifts, so users can change behavior at natural boundaries.
 
 ---
 
 ## Testing Criteria
 
-### specifying→planning requires --from
-- **Verifies:** Missing input rejection at specifying→planning boundary.
-- **Given:** PHASE_SHIFT (specifying→planning).
-- **When:** `advance` without `--from`
-- **Then:** Exit code 1.
+### specifying→planning auto-generates plan queue
+- **Verifies:** Plan queue auto-generation from completed specs.
+- **Given:** PHASE_SHIFT (specifying→planning). 2 domains (optimizer with 3 specs, portal with 2 specs). Optimizer has `set-roots` configured. Portal does not.
+- **When:** `advance` (no `--from`)
+- **Then:** `phase: "planning"`, `state: "ORIENT"`. Plan queue has 2 entries. Optimizer entry has custom code_search_roots. Portal entry has `["portal/"]` default.
 
-### specifying→planning with valid queue
-- **Verifies:** Successful phase transition with valid input.
-- **Given:** PHASE_SHIFT (specifying→planning).
-- **When:** `advance --from plans-queue.json`
-- **Then:** `phase: "planning"`, `state: "ORIENT"`.
+### specifying→planning auto-generation includes spec_commits
+- **Verifies:** Commit hashes flow from completed specs to plan queue.
+- **Given:** PHASE_SHIFT (specifying→planning). Completed specs have commit_hashes `["7cede10", "8743b1d"]` across the domain.
+- **When:** `advance` (no `--from`)
+- **Then:** Generated plan entry has `spec_commits: ["7cede10", "8743b1d"]` (deduplicated).
 
-### specifying→planning with invalid queue
+### specifying→planning with --from override
+- **Verifies:** External plan queue overrides auto-generation.
+- **Given:** PHASE_SHIFT (specifying→planning).
+- **When:** `advance --from custom-queue.json`
+- **Then:** `phase: "planning"`, `state: "ORIENT"`. Plan queue matches the external file, not auto-generated.
+
+### specifying→planning with invalid --from override
 - **Verifies:** Validation failure preserves state.
 - **Given:** PHASE_SHIFT (specifying→planning).
 - **When:** `advance --from invalid.json`
@@ -177,13 +214,13 @@ No `--from` needed — the plan.json path is already known from `current_plan.fi
 
 ### --guided at phase shift
 - **Verifies:** Guided setting mutation at phase boundaries.
-- **Given:** PHASE_SHIFT, user_guided is true.
+- **Given:** PHASE_SHIFT, `config.general.user_guided` is true.
 - **When:** `advance --no-guided --from plans-queue.json`
-- **Then:** `user_guided: false` after transition.
+- **Then:** `config.general.user_guided: false` after transition.
 
 ### Full Lifecycle: Specifying only
 - **Verifies:** Complete specifying phase ending at phase shift boundary.
-- **Given:** Init with 2 specs, `--batch-size 2 --min-rounds 1 --max-rounds 3`.
+- **Given:** Init with 2 specs, `specifying.batch: 2, specifying.eval.min_rounds: 1, specifying.eval.max_rounds: 3`.
 - **When:** Complete both specs → DONE → RECONCILE → RECONCILE_EVAL(PASS) → COMPLETE → PHASE_SHIFT.
 - **Then:** State is PHASE_SHIFT. Specifying completed with 2 specs.
 
@@ -209,6 +246,7 @@ No `--from` needed — the plan.json path is already known from `current_plan.fi
 
 ## Implements
 - Explicit PHASE_SHIFT checkpoints between phases with context refresh
-- Phase shift input injection (`--from` at specifying→planning boundary)
+- Auto-generated plan queue at specifying→planning boundary from completed specs, commit hashes, and code search roots
+- Optional `--from` override for custom plan queue at specifying→planning boundary
 - Plan validation and mutation at planning→implementing boundary
 - Full lifecycle integration across phase boundaries

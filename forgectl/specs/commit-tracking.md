@@ -7,6 +7,8 @@
 
 After specs are accepted during the specifying phase, the architect registers git commits that contain the spec work. Two commands support this: `add-commit` for explicit registration by spec ID, and `reconcile-commit` for automatic matching based on which files a commit touched. All hashes are validated against the git repository before registration.
 
+These commands are manual operations — they are always available regardless of the `enable_commits` configuration setting. The `enable_commits` flag controls whether the scaffold automatically creates commits and requires `--message` during state transitions; `add-commit` and `reconcile-commit` are for retroactively associating existing commits with specs.
+
 ## Depends On
 - **spec-lifecycle** — provides the completed specs list with file paths for matching.
 - **state-persistence** — reads and writes the state file.
@@ -16,7 +18,7 @@ After specs are accepted during the specifying phase, the architect registers gi
 | Spec | Relationship |
 |------|-------------|
 | Git repository | Hashes validated via `git cat-file -t`; file lists retrieved via `git show --name-only` |
-| spec-lifecycle | Completed specs receive commit hashes; ACCEPT auto-commits with `--message` |
+| spec-lifecycle | Completed specs receive commit hashes (via `commit_hashes` field); ACCEPT auto-commits with `--message` (TODO: not yet implemented) |
 
 ---
 
@@ -53,7 +55,7 @@ Reports which specs were updated with the commit hash, listing each matched spec
 
 ### Commit Hash Validation
 
-All commands that accept a commit hash (`add-commit`, `reconcile-commit`, and the auto-commit in specifying `advance --verdict PASS`) validate that the hash exists in git using `git cat-file -t`. The object type must be `commit`. Non-existent hashes, tags, blobs, and tree objects are rejected.
+All commands that accept a commit hash (`add-commit`, `reconcile-commit`, and the auto-commit in specifying `advance --verdict PASS` when `enable_commits: true`) validate that the hash exists in git using `git cat-file -t`. The object type must be `commit`. Non-existent hashes, tags, blobs, and tree objects are rejected.
 
 ### add-commit
 
