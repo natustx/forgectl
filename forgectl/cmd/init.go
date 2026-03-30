@@ -7,59 +7,47 @@ import (
 
 	"forgectl/state"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 var (
-	initBatchSize int
-	initMinRounds int
-	initMaxRounds int
-	initFrom      string
-	initPhase     string
-	initGuided    bool
-	initNoGuided  bool
+	initFrom  string
+	initPhase string
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a scaffold session",
-	Long:  "Creates a state file from a validated input file.",
+	Long:  "Creates a state file from a validated input file and project config.",
 	RunE:  runInit,
 }
 
 func init() {
-	initCmd.Flags().IntVar(&initBatchSize, "batch-size", 0, "Max items per batch (required)")
-	initCmd.Flags().IntVar(&initMinRounds, "min-rounds", 1, "Minimum evaluation rounds (default 1)")
-	initCmd.Flags().IntVar(&initMaxRounds, "max-rounds", 0, "Maximum evaluation rounds (required)")
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required)")
 	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing")
-	initCmd.Flags().BoolVar(&initGuided, "guided", false, "Enable guided mode (default)")
-	initCmd.Flags().BoolVar(&initNoGuided, "no-guided", false, "Disable guided mode")
 	_ = initCmd.MarkFlagRequired("from")
-	_ = initCmd.MarkFlagRequired("batch-size")
-	_ = initCmd.MarkFlagRequired("max-rounds")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	if initBatchSize < 1 {
-		return fmt.Errorf("--batch-size must be at least 1")
-	}
-	if initMinRounds < 1 {
-		return fmt.Errorf("--min-rounds must be at least 1")
-	}
-	if initMinRounds > initMaxRounds {
-		return fmt.Errorf("--min-rounds cannot exceed --max-rounds")
-	}
-
 	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true}
 	if !validPhases[initPhase] {
 		return fmt.Errorf("--phase must be specifying, planning, or implementing")
 	}
 
-	projectRoot, stateDir, err := resolveSession()
+	// Discover project root, load and validate config.
+	projectRoot, stateDir, cfg, err := resolveSession()
 	if err != nil {
 		return err
+	}
+
+	violations := state.ValidateConfig(cfg)
+	if len(violations) > 0 {
+		for _, v := range violations {
+			fmt.Fprintln(cmd.OutOrStdout(), v)
+		}
+		return fmt.Errorf("config validation failed")
 	}
 
 	if state.Exists(stateDir) {
@@ -74,32 +62,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading file: %w", err)
 	}
 
-	// Determine guided mode.
-	userGuided := true // default
-	if initNoGuided {
-		userGuided = false
-	}
-	if initGuided {
-		userGuided = true
-	}
-
 	phase := state.PhaseName(initPhase)
 	out := cmd.OutOrStdout()
-
-	cfg := state.DefaultConfig()
-	cfg.Implementing.Batch = initBatchSize
-	cfg.Implementing.Eval.MinRounds = initMinRounds
-	cfg.Implementing.Eval.MaxRounds = initMaxRounds
-	cfg.Specifying.Eval.MinRounds = initMinRounds
-	cfg.Specifying.Eval.MaxRounds = initMaxRounds
-	cfg.Planning.Eval.MinRounds = initMinRounds
-	cfg.Planning.Eval.MaxRounds = initMaxRounds
-	cfg.General.UserGuided = userGuided
+	sessionID := uuid.New().String()
 
 	s := &state.ForgeState{
 		Phase:          phase,
 		State:          state.StateOrient,
 		Config:         cfg,
+		SessionID:      sessionID,
 		StartedAtPhase: phase,
 	}
 
@@ -146,7 +117,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 	case state.PhaseImplementing:
-		// Validate as plan.json.
 		validationErrs := state.ValidatePlanJSON(data, stateDir)
 		if len(validationErrs) > 0 {
 			printValidationErrors(out, validationErrs)
@@ -157,13 +127,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("parsing plan: %w", err)
 		}
 
-		// Add passes and rounds to items.
 		for i := range plan.Items {
 			plan.Items[i].Passes = "pending"
 			plan.Items[i].Rounds = 0
 		}
 
-		// Write updated plan back.
 		planData, err := json.MarshalIndent(plan, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshaling plan: %w", err)
@@ -173,8 +141,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 		s.Implementing = state.NewImplementingState()
-		// We need a Planning reference for the plan file path.
-		// Populate name and domain from plan.json context.
 		s.Planning = &state.PlanningState{
 			CurrentPlan: &state.ActivePlan{
 				Name:   plan.Context.Module,

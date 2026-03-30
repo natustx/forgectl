@@ -18,7 +18,7 @@ func init() {
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
-	projectRoot, stateDir, err := resolveSession()
+	projectRoot, stateDir, _, err := resolveSession()
 	if err != nil {
 		return err
 	}
