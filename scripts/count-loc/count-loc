@@ -125,20 +125,13 @@ else
   printf "%-25s %8s %8s %10s %8s %12s\n" "$(printf '%.0s-' {1..25})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..12})"
 fi
 
-# Function to count specs files and lines (all *.md in */specs/ directories)
+# Function to count specs files and lines (all *.md in forgectl/specs/ only)
 count_specs_files() {
-  find "$PROJECT_ROOT" -path "*/specs/*.md" \
-    -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
-    -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
-    -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
-    2>/dev/null | wc -l
+  find "$PROJECT_ROOT/forgectl/specs" -maxdepth 1 -type f -name "*.md" 2>/dev/null | wc -l
 }
 
 count_specs_lines() {
-  find "$PROJECT_ROOT" -path "*/specs/*.md" \
-    -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
-    -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
-    -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+  find "$PROJECT_ROOT/forgectl/specs" -maxdepth 1 -type f -name "*.md" \
     -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}'
 }
 
@@ -161,11 +154,8 @@ get_char_count() {
       count_chars "Go" "*.go"
       ;;
     "Markdown")
-      # Count all *.md files in any */specs/ directory recursively
-      find "$PROJECT_ROOT" -path "*/specs/*.md" \
-        -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
-        -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
-        -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+      # Count all *.md files in forgectl/specs/ only
+      find "$PROJECT_ROOT/forgectl/specs" -maxdepth 1 -type f -name "*.md" \
         -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}'
       ;;
     *)
@@ -187,11 +177,8 @@ get_token_count() {
       count_tokens_for_language "Go" "*.go"
       ;;
     "Markdown")
-      # Count tokens for all *.md files in any */specs/ directory recursively
-      local content=$(find "$PROJECT_ROOT" -path "*/specs/*.md" \
-        -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
-        -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
-        -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+      # Count tokens for all *.md files in forgectl/specs/ only
+      local content=$(find "$PROJECT_ROOT/forgectl/specs" -maxdepth 1 -type f -name "*.md" \
         -exec cat {} \; 2>/dev/null)
 
       if [ -z "$content" ]; then
@@ -286,10 +273,7 @@ GO_CHARS=$(find "$PROJECT_ROOT" -type f -name "*.go" \
   -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
   -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}')
 
-SPECS_CHARS=$(find "$PROJECT_ROOT" -path "*/specs/*.md" \
-  -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
-  -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
-  -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+SPECS_CHARS=$(find "$PROJECT_ROOT/forgectl/specs" -maxdepth 1 -type f -name "*.md" \
   -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}')
 
 TOTAL_CHARS=$((${GO_CHARS:-0} + ${SPECS_CHARS:-0}))
