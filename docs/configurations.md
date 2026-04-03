@@ -59,6 +59,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+enable_eval_output = false
 
 [specifying.cross_reference]
 min_rounds = 1
@@ -97,6 +98,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+enable_eval_output = false
 
 [planning.refine]
 type = "refine"
@@ -113,6 +115,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+enable_eval_output = false
 
 [paths]
 state_dir = ".forgectl/state"
@@ -214,6 +217,13 @@ Model name for spec batch evaluation at EVALUATE state.
 - **Constraint:** >= 1
 
 Number of sub-agents to spawn for spec batch evaluation.
+
+#### `specifying.eval.enable_eval_output`
+
+- **Type:** boolean
+- **Default:** `false`
+
+When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
 
 #### `specifying.cross_reference.min_rounds`
 
@@ -423,6 +433,13 @@ Model name for plan evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for plan evaluation.
 
+#### `planning.eval.enable_eval_output`
+
+- **Type:** boolean
+- **Default:** `false`
+
+When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
+
 #### `planning.refine.type`
 
 - **Type:** string
@@ -500,6 +517,13 @@ Model name for implementation evaluation at EVALUATE state.
 - **Constraint:** >= 1
 
 Number of sub-agents to spawn for implementation evaluation.
+
+#### `implementing.eval.enable_eval_output`
+
+- **Type:** boolean
+- **Default:** `false`
+
+When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
 
 #### `implementing.commit_strategy`
 
@@ -594,7 +618,7 @@ After `init`, the effective configuration is stored in the state file's `config`
     "specifying": {
       "batch": 3,
       "commit_strategy": "all-specs",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
@@ -612,13 +636,13 @@ After `init`, the effective configuration is stored in the state file's `config`
       "self_review": false,
       "plan_all_before_implementing": false,
       "study_code": { "type": "explore", "model": "haiku", "count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false },
       "refine": { "type": "refine", "model": "opus", "count": 1 }
     },
     "implementing": {
       "batch": 2,
       "commit_strategy": "scoped",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false }
     },
     "paths": {
       "state_dir": ".forgectl/state",
@@ -668,7 +692,7 @@ These fields live at the top level of the state file, outside the `config` objec
 
 | Field | Description |
 |-------|-------------|
-| `phase` | Active phase: `specifying`, `planning`, `implementing` |
+| `phase` | Active phase: `specifying`, `generate_planning_queue`, `planning`, `implementing` |
 | `state` | Current state within the active phase |
 | `started_at_phase` | Which phase the session was initialized at (display only) |
 | `phase_shift` | Records from/to during PHASE_SHIFT transitions |

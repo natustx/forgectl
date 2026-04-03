@@ -39,6 +39,8 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for evaluation.
 count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 [specifying.cross_reference]
 # Minimum eval rounds for domain cross-reference.
@@ -118,6 +120,8 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for plan evaluation.
 count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 [planning.refine]
 # Sub-agent role for this spawn point.
@@ -149,6 +153,8 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for implementation evaluation.
 count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.

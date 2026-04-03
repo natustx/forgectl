@@ -49,9 +49,10 @@
   │   │  │ ORIENT           │ (none required)                            │
   │   │  │ SELECT           │ (none required)                            │
   │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
-  │   │  │ EVALUATE         │ --verdict PASS|FAIL  --eval-report <path>  │
+  │   │  │ EVALUATE         │ --verdict PASS|FAIL                        │
+  │   │  │                  │ --eval-report <path>  (if enable_eval_out) │
   │   │  │ REFINE           │ (none required)                            │
-  │   │  │ ACCEPT           │ --message (planning, if enable_commits)     │
+  │   │  │ ACCEPT           │ --message (planning, if enable_commits)    │
   │   │  │ IMPLEMENT        │ --message (first round, if enable_commits) │
   │   │  │ COMMIT           │ --message (if enable_commits)              │
   │   │  │ RECONCILE        │ (none required)                            │
@@ -59,6 +60,7 @@
   │   │  │ RECONCILE_REVIEW │ (none required)                            │
   │   │  │ COMPLETE         │ --message (specifying, if enable_commits)  │
   │   │  │ PHASE_SHIFT      │ --from <path>  (specifying or gen_plan_q)  │
+  │   │  │ SELF_REVIEW      │ (none required)                            │
   │   │  │ STUDY_*          │ (none required)                            │
   │   │  │ REVIEW           │ (none required)                            │
   │   │  │ VALIDATE         │ (none required)                            │
@@ -89,12 +91,18 @@
   ├── add-queue-item ───── Append a spec to the specifying queue
   │   │
   │   │  Required flags:
-  │   │    --domain <str>  Domain name
-  │   │    --name <str>    Spec name to add to queue
+  │   │    --name <str>    Spec name (must be unique)
+  │   │    --topic <str>   Topic of concern
+  │   │    --file <path>   Path to spec file (must exist, must match
+  │   │                    <domain>/specs/<name>.md convention)
   │   │
-  │   │  Appends to specifying.queue[]. Valid only when session exists.
+  │   │  Optional flags:
+  │   │    --domain <str>  Domain name (required when no match found)
   │   │
-  │   └─── Output: "Added {name} to specifying queue."
+  │   │  Domain resolved from: configured domains → session domains
+  │   │  Valid in: DRAFT, CROSS_REFERENCE_REVIEW, DONE, RECONCILE_REVIEW
+  │   │
+  │   └─── Output: "Added {name} to specifying queue for domain {domain}."
   │
   │
   ├── set-roots ────────── Set code search roots for a domain

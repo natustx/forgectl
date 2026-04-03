@@ -167,7 +167,7 @@
   │      ──► ACCEPT ──► PHASE_SHIFT                                        │
   │                                                                         │
   │  Produces:                                                               │
-  │    <domain>/.workspace/implementation_plan/                              │
+  │    <domain>/.forge_workspace/implementation_plan/                        │
   │    ├── plan.json       (structured manifest)                            │
   │    └── notes/          (per-package implementation guidance)             │
   │        ├── <pkg-a>.md                                                   │

@@ -11,10 +11,12 @@ Forgectl stores activity logs in `~/.forgectl/logs/` in JSONL (JSON Lines) forma
 ```
 
 Where:
-- `phase` — initial phase name (`specifying`, `planning`, or `implementing`)
+- `phase` — initial phase name (`specifying`, `generate_planning_queue`, `planning`, or `implementing`)
 - `session_id_prefix` — first 8 characters of the UUID v4 generated at session init
 
 Example: `planning-a1b2c3d4.jsonl`
+
+When a session spans multiple phases (e.g., specifying → generate_planning_queue → planning → implementing), the log file name uses the initial phase. The file name does not change when phases shift.
 
 ## Logged Operations
 
@@ -41,7 +43,7 @@ The following state file operations do not produce activity log entries:
 - `add-queue-item` — queue manipulation
 - `set-roots` — root path modification
 
-These operations modify the persistent state file but do not represent user-driven activity flows.
+These operations modify the persistent state file but do not represent user-driven activity flows. Only `init` and `advance` are logged.
 
 ## Configuration
 

@@ -75,16 +75,29 @@ See: [schemas/plan-queue.md](../schemas/plan-queue.md)
 2. Top-level fields — only `context`, `refs`, `layers`, `items`
 3. Context fields — `domain` and `module` required, non-empty
 4. Refs exist — every `refs[].path` resolves to an existing file
-5. Item schema — every item has `id`, `name`, `description`, `depends_on`, `tests`
+5. Item schema — every item has `id`, `name`, `description`, `depends_on`, `specs`, `refs`, `files`, `tests`
 6. Item ID uniqueness — no duplicate IDs
 7. Layer coverage — every item in exactly one layer; every layer item ID exists
 8. Layer ordering — items only depend on items in equal or earlier layers
 9. DAG validity — no cycles in `depends_on` graph
 10. Test schema — every test has `category` and `description`; category is `functional`, `rejection`, or `edge_case`
 11. Test categories — at least one test per item
-12. Notes files — every `ref` in items resolves to an existing file
+12. Notes files — every path in `items[].refs` resolves to an existing notes file (relative to plan.json directory)
 
 See: [schemas/plan-json.md](../schemas/plan-json.md)
+
+### Path Resolution for plan.json
+
+Relative paths in plan.json are resolved differently depending on their field:
+
+| Field | Resolved relative to |
+|-------|---------------------|
+| `refs[].path` | Directory containing plan.json (i.e., `<domain>/<workspace_dir>/implementation_plan/`) |
+| `items[].refs` | Directory containing plan.json (i.e., `<domain>/<workspace_dir>/implementation_plan/`) |
+| `items[].files` | Project root |
+| `items[].specs` | Project root |
+
+This matches the resolution behavior used during `init` and phase transitions.
 
 ## Exit Codes
 

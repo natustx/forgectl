@@ -1,5 +1,5 @@
 ================================================================================
-               PHASE 2: PLANNING — Detailed State Machine
+               PHASE 3: PLANNING — Detailed State Machine
 ================================================================================
 
   Role: Staff Engineer
@@ -17,8 +17,8 @@
   │  (Config: batch, eval.max_rounds, eval.min_rounds in .forgectl/config)  │
   │  (Optional: --guided for user checkpoints)                              │
   │                                                                         │
-  │  OR: PHASE_SHIFT from specifying phase                                  │
-  │      forgectl advance --from plan-queue.json                            │
+  │  OR: PHASE_SHIFT from generate_planning_queue phase (automatic)         │
+  │      forgectl advance  [--from <plan-queue.json>]                       │
   └────────────────────────────────┬────────────────────────────────────────┘
                                    │
                                    ▼
@@ -105,7 +105,7 @@
   │  │   │    "items":   [{                              │                  │
   │  │   │      id, name, description,                   │                  │
   │  │   │      depends_on[], steps[], files[],          │                  │
-  │  │   │      spec, ref,                               │                  │
+  │  │   │      specs[], refs[],                         │                  │
   │  │   │      tests: [{ category, description }]       │                  │
   │  │   │    }]                                         │                  │
   │  │   │  }                                            │                  │
@@ -137,7 +137,8 @@
                    │        │  - No dependency cycles                       │
                    │        │  - Test categories: functional, rejection,    │
                    │        │    edge_case                                  │
-                   │        │  - Notes files exist                          │
+                   │        │  - Notes files exist (items[].refs)           │
+                   │        │  - Spec files exist (items[].specs)           │
                    │        │                                               │
                    │        │  Fix errors and re-advance                    │
                    │        └──────────────────────┬────────────────────────┘
@@ -171,9 +172,12 @@
   │   10. Testing Criteria — all tests mapped to plan items                │
   │   11. Dependencies     — DAG valid, schema compliant                   │
   │                                                                         │
-  │  Output: evals/round-N.md                                               │
+  │  Output: evals/round-N.md  (when enable_eval_output: true)              │
   │                                                                         │
-  │  Action: forgectl advance --verdict PASS|FAIL --eval-report <path>      │
+  │  Action (enable_eval_output: true):                                     │
+  │    forgectl advance --verdict PASS|FAIL --eval-report <path>            │
+  │  Action (enable_eval_output: false):                                    │
+  │    forgectl advance --verdict PASS|FAIL                                 │
   └────────────────┬──────────────────────────────┬─────────────────────────┘
                    │                              │
       ┌────────────┤                              │
@@ -185,26 +189,40 @@
   ┌──────────────────────┐              ┌──────────────────────┐
   │  REFINE               │              │  ACCEPT               │
   │                       │              │                       │
-  │  - Spawn sub-agent    │              │  Plan finalized.      │
-  │  - Update plan.json   │              │                       │
-  │  - Update notes/*.md  │              │  forgectl advance     │
-  │  - Address eval       │              │  (--message if        │
-  │    deficiencies       │              │   enable_commits)     │
-  │                       │              └───────────┬───────────┘
-  │  forgectl advance     │                          │
+  │  - Update plan.json   │              │  Plan finalized.      │
+  │  - Update notes/*.md  │              │  Per-plan commit:     │
+  │  - Address eval       │              │    forgectl advance   │
+  │    deficiencies       │              │    --message (if      │
+  │                       │              │    enable_commits)    │
+  │  forgectl advance     │              └───────────┬───────────┘
   └───────────┬───────────┘                          │
-              │                                      │
-              └──► SELF_REVIEW* or EVALUATE          │
-                   (or VALIDATE if plan invalid)      │
-                   * when self_review: true           │
-                                                     ▼
-                                               PHASE_SHIFT
-                                          (planning → implementing)
-                                                     │
+              │                              ┌───────┴────────┐
+              └──► SELF_REVIEW* or EVALUATE  │                │
+                   (or VALIDATE if invalid)  │ plan_all: true │
+                   * when self_review: true  │ queue non-empty │
+                                             │                │
+                                             ▼                │
+                                          PHASE_SHIFT         │
+                                    (planning → planning,     │
+                                     domain boundary)         │
+                                             │                │
+                                     ──► planning ORIENT      │
+                                         (next domain)        │
+                                                              │ queue empty
+                                                              ▼
+                                                            DONE
+                                                              │
+                                                              ▼
+                                                       PHASE_SHIFT
+                                                  (planning → implementing)
+                                                       │
+                                          OR (plan_all: false, ACCEPT):
+                                          PHASE_SHIFT (planning → implementing)
+                                                       │
                                           Mutates plan.json:
                                           + passes: "pending"
                                           + rounds: 0
                                           (on every item)
-                                                     │
-                                                     ▼
-                                            Implementing Phase
+                                                       │
+                                                       ▼
+                                              Implementing Phase
