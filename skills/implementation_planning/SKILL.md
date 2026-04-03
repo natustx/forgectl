@@ -101,7 +101,7 @@ Format: [references/plan-format.json](references/plan-format.json)
 These are common validation failures. Read [references/plan-format.json](references/plan-format.json) for the full schema.
 
 1. **`refs` must be objects, not strings.** Each entry needs `{"id": "...", "path": "..."}`. Plain strings like `"specs/foo.md"` will fail parsing.
-2. **All paths are relative to plan.json's directory**, not the project root. If plan.json is at `api/.workspace/implementation_plan/plan.json`, then spec paths look like `../../specs/foo.md` and notes paths look like `notes/bar.md`.
+2. **All paths are relative to the project root** (the directory containing `.forgectl/`). If plan.json is at `api/.forge_workspace/implementation_plan/plan.json`, then spec paths look like `api/specs/foo.md` and notes paths look like `api/.forge_workspace/implementation_plan/notes/bar.md`.
 3. **No `#anchor` fragments in paths.** `ref: "notes/foo.md#section"` will fail — forgectl runs `os.Stat()` on the raw string. Use `ref: "notes/foo.md"` instead.
 4. **`spec` is a single string, not an array.** To reference multiple spec sections, use the description or notes file.
 5. **`context` only has `domain` and `module`.** Extra fields like `go_version` or `binary` are silently ignored but add no value.

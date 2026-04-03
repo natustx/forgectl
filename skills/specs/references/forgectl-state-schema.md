@@ -54,12 +54,26 @@ COMPLETE → PHASE_SHIFT
 | `RECONCILE_EVAL` | Sub-agent evaluates cross-spec consistency. |
 | `RECONCILE_REVIEW` | Human reviews reconciliation eval. Accept or grant another pass. |
 | `COMPLETE` | Session fully done. |
-| `PHASE_SHIFT` | Transitioning to the next phase (specifying → planning). |
+| `PHASE_SHIFT` | Transitioning to the next phase (specifying → generate_planning_queue). |
+
+### Generate Planning Queue Phase
+
+```
+ORIENT → REFINE → PHASE_SHIFT
+```
+
+| State | Description |
+|-------|-------------|
+| `ORIENT` | Auto-generate plan queue from completed specs. Write to `<state_dir>/plan-queue.json`. |
+| `REFINE` | Architect reviews, reorders, edits the plan queue file. Validates on advance. |
+| `PHASE_SHIFT` | Transitioning to planning. `--from` override available. |
 
 ### Planning Phase
 
 ```
-ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT → VALIDATE → EVALUATE ⇄ REFINE → ACCEPT → PHASE_SHIFT
+ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT → VALIDATE → SELF_REVIEW* → EVALUATE ⇄ REFINE → ACCEPT → PHASE_SHIFT
+
+* SELF_REVIEW only entered when planning.self_review is true.
 ```
 
 ### Implementing Phase
@@ -175,6 +189,6 @@ The `--from` file for `forgectl init --phase specifying`. This is the same schem
 | `forgectl advance --verdict PASS --eval-report <path> --message "msg"` | Accept an evaluation (EVALUATE state). |
 | `forgectl advance --verdict FAIL --eval-report <path>` | Fail an evaluation → REFINE. |
 | `forgectl advance --file <path>` | Override spec file path (DRAFT state only). |
-| `forgectl add-commit --id <n> --hash <hash>` | Register a commit to a completed spec. |
-| `forgectl reconcile-commit --hash <hash>` | Auto-register a commit to all specs it touched. |
+| `forgectl add-queue-item --name <name> --topic <topic> --file <file>` | Append a spec to the queue (DRAFT, CROSS_REFERENCE_REVIEW, DONE, RECONCILE_REVIEW). |
+| `forgectl set-roots <path> [<path>...]` | Set code search roots for a domain (CROSS_REFERENCE_REVIEW, DONE). |
 | `forgectl status` | Read-only. Print current state and session overview. |

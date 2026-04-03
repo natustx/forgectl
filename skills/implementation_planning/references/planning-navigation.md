@@ -93,7 +93,7 @@ Only entered when `plan.json` fails structural validation. Forgectl prints speci
 
 **Common validation failures:**
 - `cannot unmarshal string into Go struct field PlanJSON.refs of type state.PlanRef` — `refs` entries must be objects `{"id": "...", "path": "..."}`, not plain strings.
-- `refs: path "..." does not exist` — Paths are resolved relative to `filepath.Dir(plan.json)`, not the project root. Use `../../specs/foo.md` style relative paths.
+- `refs: path "..." does not exist` — Paths are resolved relative to the project root (the directory containing `.forgectl/`). Use full paths from root like `api/specs/foo.md`.
 - `items[N]: ref "notes/foo.md#section" does not exist` — Remove `#anchor` fragments from `ref` paths. Forgectl runs `os.Stat()` on the raw string including the fragment.
 - `missing required field "tests"` or `"depends_on"` — These fields must be arrays, never null. Use `[]` for empty.
 
