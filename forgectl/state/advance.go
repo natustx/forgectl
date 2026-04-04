@@ -70,20 +70,27 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in EVALUATE state")
-		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		evalEnabled := s.Config.Specifying.Eval.EnableEvalOutput
+		if evalEnabled {
+			if in.EvalReport == "" {
+				return fmt.Errorf("--eval-report is required in EVALUATE state")
+			}
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
+		}
+		evalReport := in.EvalReport
+		if !evalEnabled {
+			evalReport = ""
 		}
 
 		eval := EvalRecord{
 			Round:      spec.CurrentSpec.Round,
 			Verdict:    in.Verdict,
-			EvalReport: in.EvalReport,
+			EvalReport: evalReport,
 		}
 		spec.CurrentSpec.Evals = append(spec.CurrentSpec.Evals, eval)
 
@@ -141,10 +148,21 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
+		reconEvalEnabled := s.Config.Specifying.Eval.EnableEvalOutput
+		reconEvalReport := in.EvalReport
+		if reconEvalEnabled && in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
+		}
+		if !reconEvalEnabled {
+			reconEvalReport = ""
+		}
 
 		eval := EvalRecord{
-			Round:   spec.Reconcile.Round,
-			Verdict: in.Verdict,
+			Round:      spec.Reconcile.Round,
+			Verdict:    in.Verdict,
+			EvalReport: reconEvalReport,
 		}
 		spec.Reconcile.Evals = append(spec.Reconcile.Evals, eval)
 
@@ -166,6 +184,9 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 
 	case StateComplete:
+		if s.Config.General.EnableCommits && in.Message == "" {
+			return fmt.Errorf("--message is required when enable_commits is true")
+		}
 		s.State = StatePhaseShift
 		s.PhaseShift = &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning}
 
@@ -205,20 +226,27 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in EVALUATE state")
-		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		planEvalEnabled := s.Config.Planning.Eval.EnableEvalOutput
+		if planEvalEnabled {
+			if in.EvalReport == "" {
+				return fmt.Errorf("--eval-report is required in EVALUATE state")
+			}
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
+		}
+		planEvalReport := in.EvalReport
+		if !planEvalEnabled {
+			planEvalReport = ""
 		}
 
 		eval := EvalRecord{
 			Round:      s.Planning.Round,
 			Verdict:    in.Verdict,
-			EvalReport: in.EvalReport,
+			EvalReport: planEvalReport,
 		}
 		s.Planning.Evals = append(s.Planning.Evals, eval)
 
@@ -241,8 +269,8 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		return advancePlanningFromDraftOrRefine(s, dir)
 
 	case StateAccept:
-		if in.Message == "" {
-			return fmt.Errorf("--message is required in planning ACCEPT state")
+		if s.Config.General.EnableCommits && in.Message == "" {
+			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
 		}
 		s.State = StatePhaseShift
 		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
@@ -321,8 +349,8 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		return advanceImplFromEvaluate(s, in, dir)
 
 	case StateCommit:
-		if in.Message == "" {
-			return fmt.Errorf("--message is required in COMMIT state")
+		if s.Config.General.EnableCommits && in.Message == "" {
+			return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
 		}
 		// Archive batch to history.
 		archiveBatch(s)
@@ -411,9 +439,9 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		return err
 	}
 
-	// First round requires --message.
-	if batch.EvalRound == 0 && in.Message == "" {
-		return fmt.Errorf("--message is required for first-round implementation")
+	// First round requires --message when commits are enabled.
+	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
+		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
 	}
 
 	// Mark current item as done.
@@ -447,14 +475,21 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	if in.Verdict == "" {
 		return fmt.Errorf("--verdict is required in EVALUATE state")
 	}
-	if in.EvalReport == "" {
-		return fmt.Errorf("--eval-report is required in EVALUATE state")
-	}
 	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 		return fmt.Errorf("--verdict must be PASS or FAIL")
 	}
-	if err := checkEvalReportExists(in.EvalReport); err != nil {
-		return err
+	implEvalEnabled := s.Config.Implementing.Eval.EnableEvalOutput
+	if implEvalEnabled {
+		if in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in EVALUATE state")
+		}
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
+	}
+	implEvalReport := in.EvalReport
+	if !implEvalEnabled {
+		implEvalReport = ""
 	}
 
 	impl := s.Implementing
@@ -464,7 +499,7 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	eval := EvalRecord{
 		Round:      batch.EvalRound,
 		Verdict:    in.Verdict,
-		EvalReport: in.EvalReport,
+		EvalReport: implEvalReport,
 	}
 	batch.Evals = append(batch.Evals, eval)
 

@@ -474,6 +474,7 @@ func TestPlanningValidateSucceedsToEvaluate(t *testing.T) {
 
 func TestSpecifyingEvalReportMustExist(t *testing.T) {
 	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true // require eval report
 	advanceToEvaluate(t, s)
 
 	err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: "/nonexistent/path.md"}, "")
@@ -611,6 +612,7 @@ func TestImplementLastItemGoesToEvaluate(t *testing.T) {
 func TestFirstRoundImplementRequiresMessage(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true // require message when commits enabled
 
 	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
 

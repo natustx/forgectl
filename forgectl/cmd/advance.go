@@ -41,10 +41,13 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate context-dependent flag constraints.
-	if err := validateAdvanceFlags(s); err != nil {
-		return err
+	out := cmd.OutOrStdout()
+
+	// Validate context-dependent flag constraints and print warnings.
+	if err2 := validateAdvanceFlags(s); err2 != nil {
+		return err2
 	}
+	printAdvanceWarnings(out, s)
 
 	// Build input.
 	var guided *bool
@@ -65,8 +68,6 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		From:       advanceFrom,
 		Guided:     guided,
 	}
-
-	out := cmd.OutOrStdout()
 
 	err = state.Advance(s, in, stateDir)
 	if err != nil {
@@ -115,4 +116,41 @@ func validateAdvanceFlags(s *state.ForgeState) error {
 	}
 
 	return nil
+}
+
+// printAdvanceWarnings prints warnings about flags that will be ignored due to config settings.
+func printAdvanceWarnings(w interface{ Write([]byte) (int, error) }, s *state.ForgeState) {
+	evalStates := map[state.StateName]bool{
+		state.StateEvaluate:      true,
+		state.StateReconcileEval: true,
+	}
+
+	// Warn if --eval-report provided but eval output is disabled.
+	if advanceEvalReport != "" && evalStates[s.State] {
+		var enabled bool
+		switch s.Phase {
+		case state.PhaseSpecifying:
+			enabled = s.Config.Specifying.Eval.EnableEvalOutput
+		case state.PhasePlanning:
+			enabled = s.Config.Planning.Eval.EnableEvalOutput
+		case state.PhaseImplementing:
+			enabled = s.Config.Implementing.Eval.EnableEvalOutput
+		}
+		if !enabled {
+			fmt.Fprintf(w, "warning: ignoring --eval-report: eval output is not enabled\n")
+		}
+	}
+
+	// Warn if --message provided but commits are disabled.
+	if advanceMessage != "" && !s.Config.General.EnableCommits {
+		commitStates := map[state.StateName]bool{
+			state.StateComplete:  true,
+			state.StateAccept:    true,
+			state.StateImplement: true,
+			state.StateCommit:    true,
+		}
+		if commitStates[s.State] {
+			fmt.Fprintf(w, "warning: ignoring --message: commits are not enabled\n")
+		}
+	}
 }
