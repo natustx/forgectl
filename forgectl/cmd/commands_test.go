@@ -11,11 +11,16 @@ import (
 	"forgectl/state"
 )
 
-// setupProjectRoot creates a .forgectl/ directory in dir so FindProjectRoot succeeds.
+// setupProjectRoot creates a .forgectl/ directory with an empty config file in dir
+// so FindProjectRoot and LoadConfig succeed.
 func setupProjectRoot(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".forgectl"), 0755); err != nil {
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
 		t.Fatalf("creating .forgectl: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(""), 0644); err != nil {
+		t.Fatalf("creating .forgectl/config: %v", err)
 	}
 }
 
@@ -408,7 +413,10 @@ func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
 			},
 		},
 		Specifying: &state.SpecifyingState{
-			CrossReference: &state.CrossReferenceState{Domain: "test", Round: 1},
+			CurrentDomain: "test",
+			CrossReference: map[string]*state.CrossReferenceState{
+				"test": {Domain: "test", Round: 1},
+			},
 			Completed: []state.CompletedSpec{
 				{ID: 1, Name: "spec-a.md", Domain: "test", File: "test/specs/spec-a.md", RoundsTaken: 1},
 			},
@@ -525,8 +533,11 @@ func TestValidateSpecQueueValid(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid spec-queue") {
-		t.Errorf("expected 'valid spec-queue' in output, got: %s", out)
+	if !strings.Contains(out, "Detected: spec-queue") {
+		t.Errorf("expected 'Detected: spec-queue' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors' in output, got: %s", out)
 	}
 }
 
@@ -542,8 +553,11 @@ func TestValidatePlanQueueValid(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid plan-queue") {
-		t.Errorf("expected 'valid plan-queue' in output, got: %s", out)
+	if !strings.Contains(out, "Detected: plan-queue") {
+		t.Errorf("expected 'Detected: plan-queue' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors' in output, got: %s", out)
 	}
 }
 
@@ -559,8 +573,11 @@ func TestValidatePlanValid(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid plan") {
-		t.Errorf("expected 'valid plan' in output, got: %s", out)
+	if !strings.Contains(out, "Detected: plan") {
+		t.Errorf("expected 'Detected: plan' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors' in output, got: %s", out)
 	}
 }
 
@@ -578,8 +595,8 @@ func TestValidateTypeOverride(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid spec-queue") {
-		t.Errorf("expected 'valid spec-queue', got: %s", out)
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors', got: %s", out)
 	}
 }
 
@@ -629,13 +646,28 @@ func TestValidateUndetectableJSON(t *testing.T) {
 	path := filepath.Join(dir, "weird.json")
 	os.WriteFile(path, data, 0644)
 
+	exited := false
+	origExit := osExit
+	osExit = func(code int) { exited = true }
+	defer func() { osExit = origExit }()
+
 	var buf bytes.Buffer
 	validateCmd.SetOut(&buf)
 	validateType = ""
 
 	err := runValidate(validateCmd, []string{path})
-	if err == nil {
-		t.Error("expected error for undetectable JSON type")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !exited {
+		t.Error("expected osExit(1) for undetectable JSON type")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "cannot detect file type") {
+		t.Errorf("expected 'cannot detect file type' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Hint: use --type") {
+		t.Errorf("expected hint about --type, got: %s", out)
 	}
 }
 
@@ -660,8 +692,11 @@ func TestValidatePlanAutoDetect(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid plan") {
-		t.Errorf("expected 'valid plan' in auto-detect output, got: %s", out)
+	if !strings.Contains(out, "Detected: plan") {
+		t.Errorf("expected 'Detected: plan' in auto-detect output, got: %s", out)
+	}
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors', got: %s", out)
 	}
 }
 
@@ -678,8 +713,11 @@ func TestValidatePlanQueueAutoDetect(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid plan-queue") {
-		t.Errorf("expected 'valid plan-queue' in auto-detect output, got: %s", out)
+	if !strings.Contains(out, "Detected: plan-queue") {
+		t.Errorf("expected 'Detected: plan-queue' in auto-detect output, got: %s", out)
+	}
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors', got: %s", out)
 	}
 }
 
@@ -708,11 +746,8 @@ func TestValidateInvalidSpecQueueShowsFailOutput(t *testing.T) {
 		t.Error("expected osExit(1) to be called")
 	}
 	out := buf.String()
-	if !strings.Contains(out, "FAIL:") {
-		t.Errorf("expected 'FAIL:' in output, got: %s", out)
-	}
-	if !strings.Contains(out, "bad-queue.json") {
-		t.Errorf("expected filename in FAIL output, got: %s", out)
+	if !strings.Contains(out, "Error: validation failed with") {
+		t.Errorf("expected 'Error: validation failed with' in output, got: %s", out)
 	}
 }
 
@@ -721,23 +756,20 @@ func TestValidateTypeOverrideConflictFails(t *testing.T) {
 	// Write a spec-queue file but try to validate it as a plan.
 	file := writeValidSpecQueueFile(t, dir)
 
-	exited := false
-	origExit := osExit
-	osExit = func(code int) { exited = true }
-	defer func() { osExit = origExit }()
-
 	var buf bytes.Buffer
 	validateCmd.SetOut(&buf)
 	validateType = "plan"
 	defer func() { validateType = "" }()
 
 	err := runValidate(validateCmd, []string{file})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for type/key mismatch")
 	}
-	// A spec-queue file parsed as plan.json should fail validation.
-	if !exited {
-		t.Error("expected validation failure (osExit) when --type plan is used on a spec-queue file")
+	if !strings.Contains(err.Error(), "--type plan expects") {
+		t.Errorf("expected '--type plan expects' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Hint: did you mean --type spec-queue") {
+		t.Errorf("expected hint about spec-queue, got: %v", err)
 	}
 }
 
@@ -755,8 +787,8 @@ func TestValidateTypePlanExplicit(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "valid plan") {
-		t.Errorf("expected 'valid plan' with explicit --type plan, got: %s", out)
+	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
+		t.Errorf("expected 'Validated:' with 'no errors' with explicit --type plan, got: %s", out)
 	}
 }
 
@@ -766,13 +798,25 @@ func TestValidateEmptyObjectFailsAutoDetect(t *testing.T) {
 	path := filepath.Join(dir, "empty.json")
 	os.WriteFile(path, data, 0644)
 
+	exited := false
+	origExit := osExit
+	osExit = func(code int) { exited = true }
+	defer func() { osExit = origExit }()
+
+	var buf bytes.Buffer
+	validateCmd.SetOut(&buf)
 	validateType = ""
+
 	err := runValidate(validateCmd, []string{path})
-	if err == nil {
-		t.Error("expected error for empty {} object (cannot determine file type)")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if err != nil && !strings.Contains(err.Error(), "cannot determine file type") && !strings.Contains(err.Error(), "cannot detect file type") {
-		t.Errorf("expected 'cannot determine file type' in error, got: %v", err)
+	if !exited {
+		t.Error("expected osExit(1) for empty {} object")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "cannot detect file type") {
+		t.Errorf("expected 'cannot detect file type' in output, got: %s", out)
 	}
 }
 
