@@ -11,7 +11,7 @@ The eval sub-agent evaluates all specs in the batch together. The entire batch c
 
 After the last batch for a domain is accepted, the scaffold enters a domain-scoped CROSS_REFERENCE phase. This cross-references ALL specs in the domain (session specs and existing specs) before moving to the next domain.
 
-When `enable_commits` is `false` (default), `--message` is not required at any state. When `enable_commits` is `true`, `--message` is required at EVALUATE with PASS verdict. TODO: automatic git commit execution is not yet implemented.
+When `enable_commits` is `true`, the specifying phase produces a single commit at COMPLETE (in spec-reconciliation) covering all spec work. No commits are made during individual eval rounds, refinements, or cross-referencing. See `docs/auto-committing.md` for full auto-commit behavior and staging strategies.
 
 The scaffold does not spawn sub-agents. It outputs instructions telling the architect what to spawn. The architect (or the skill driving the session) is responsible for spawning them.
 
@@ -26,11 +26,13 @@ This spec covers the spec lifecycle from ORIENT through DONE. Cross-domain recon
 | Spec | Relationship |
 |------|-------------|
 | Specs skill | The DRAFT and REFINE action outputs reference skill files (`references/spec-format.md`, `references/spec-generation-skill.md`, `references/topic-of-concern.md`) that define the authoring process; the scaffold enforces the state machine that sequences it |
+| Spec evaluation prompt (`evaluators/spec-eval.md`, embedded in binary) | Full instructions for the spec evaluation sub-agent: what to check, report format, verdict rules |
+| Cross-reference evaluation prompt (`evaluators/cross-reference-eval.md`, embedded in binary) | Full instructions for the cross-reference evaluation sub-agent |
 | Spec generation sub-agent | The specifying EVALUATE state is where the architect spawns a sub-agent to evaluate the batch; the scaffold tracks round count, verdict, and eval report path |
 | spec-reconciliation | Receives the completed specs list when the queue is exhausted (DONE state) |
-| commit-tracking | Completed specs receive commit hashes (via `commit_hashes` field) through add-commit and reconcile-commit |
+| spec-reconciliation | Completed specs receive commit hashes (via `commit_hashes` field) through auto-commit at COMPLETE when `enable_commits: true` |
 | Eval output directory | The specifying eval sub-agent writes output to `<domain>/specs/.eval/`; the scaffold does not read these files but the convention is documented |
-| phase-transitions | Completed specs, commit hashes, and code search roots feed into auto-generated plan-queue at specifying→planning phase shift |
+| phase-transitions | Completed specs, commit hashes, and code search roots feed into auto-generated plan-queue at generate_planning_queue phase |
 
 ---
 
@@ -43,13 +45,19 @@ This spec covers the spec lifecycle from ORIENT through DONE. Cross-domain recon
 | State | Flags |
 |-------|-------|
 | DRAFT | (no flags) |
-| EVALUATE | `--verdict PASS\|FAIL`, `--eval-report <path>` (required), `--message <text>` (required with PASS when `enable_commits: true`) |
+| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
 | REFINE | (no flags) |
 | CROSS_REFERENCE | (no flags) |
-| CROSS_REFERENCE_EVAL | `--verdict PASS\|FAIL`, `--eval-report <path>` (required) |
+| CROSS_REFERENCE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
 | CROSS_REFERENCE_REVIEW | (no flags) |
 
 The `--guided` / `--no-guided` flags are accepted on any `advance` call regardless of state.
+
+#### `eval` command
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `eval` | none | Output full evaluation context for the sub-agent. Only valid in specifying EVALUATE or CROSS_REFERENCE_EVAL. |
 
 #### `add-queue-item` — Add spec to queue
 
@@ -130,7 +138,7 @@ Action:  Draft all specs in the batch using the spec skill.
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering EVALUATE** (after DRAFT or REFINE):
+**Entering EVALUATE** (after DRAFT or REFINE, `enable_eval_output: true`):
 
 ```
 State:   EVALUATE
@@ -144,11 +152,53 @@ Specs:
   [2] snapshot-diffing.md
   [3] cache-invalidation.md
 Action:  Please spawn 1 opus sub-agent to evaluate the spec batch.
-         Eval output: optimizer/specs/.eval/batch-1-r1.md
+         The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
-**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds):
+**Entering EVALUATE** (after DRAFT or REFINE, `enable_eval_output: false`):
+
+```
+State:   EVALUATE
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Batch:   3 specs
+Round:   1/3
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Please spawn 1 opus sub-agent to evaluate the spec batch.
+         The sub-agent should run: forgectl eval
+         After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `enable_eval_output: true`):
+
+```
+State:   REFINE
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Batch:   3 specs
+Round:   1/3
+Eval:    optimizer/specs/.eval/batch-1-r1.md
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Study the eval file "optimizer/specs/.eval/batch-1-r1.md"
+         and implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         Format:      references/spec-format.md
+         Process:     references/spec-generation-skill.md
+         Scoping:     references/topic-of-concern.md
+         After completion of the above, advance to continue evaluation.
+```
+
+**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `enable_eval_output: false`):
 
 ```
 State:   REFINE
@@ -161,9 +211,10 @@ Specs:
   [1] repository-loading.md
   [2] snapshot-diffing.md
   [3] cache-invalidation.md
-Action:  Read the eval report and address any findings in the spec files
-         using the spec skill.
-         Eval report: optimizer/specs/.eval/batch-1-r1.md
+Action:  Make corrections based off communication with the evaluator.
+         Implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
          Format:      references/spec-format.md
          Process:     references/spec-generation-skill.md
          Scoping:     references/topic-of-concern.md
@@ -206,7 +257,7 @@ Action:  Please spawn 3 haiku sub-agents to cross-reference ALL specs in this do
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE):
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `enable_eval_output: true`):
 
 ```
 State:   CROSS_REFERENCE_EVAL
@@ -214,10 +265,24 @@ Phase:   specifying
 Domain:  optimizer
 Path:    optimizer/
 Round:   1/2
-Eval:    optimizer/specs/.eval/cross-reference-r1.md
 
 Action:  Please spawn 1 opus sub-agent to evaluate cross-reference consistency.
+         The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+```
+
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `enable_eval_output: false`):
+
+```
+State:   CROSS_REFERENCE_EVAL
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Round:   1/2
+
+Action:  Please spawn 1 opus sub-agent to evaluate cross-reference consistency.
+         The sub-agent should run: forgectl eval
+         After completion of the above, advance with --verdict PASS|FAIL
 ```
 
 **Entering CROSS_REFERENCE_REVIEW** (after first CROSS_REFERENCE_EVAL):
@@ -294,15 +359,36 @@ Cross-reference eval reports:
 
 #### `status` output — Specifying (compact)
 
-The compact `status` output for specifying shows the current batch, round, action, and a one-line progress summary:
+The compact `status` output for specifying shows the current batch, round, action, and a one-line progress summary.
+
+When `enable_eval_output: true`:
 
 ```
 Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
 Round:   1/3
 
-Action:  Read the eval report and address any findings in the spec files
-         using the spec skill.
-         Eval report: optimizer/specs/.eval/batch-1-r1.md
+Action:  Study the eval file "optimizer/specs/.eval/batch-1-r1.md"
+         and implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         Format:      references/spec-format.md
+         Process:     references/spec-generation-skill.md
+         Scoping:     references/topic-of-concern.md
+         After completion of the above, advance to continue evaluation.
+
+Progress: 1/5 specs completed, 2 queued
+```
+
+When `enable_eval_output: false`:
+
+```
+Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
+Round:   1/3
+
+Action:  Make corrections based off communication with the evaluator.
+         Implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
          Format:      references/spec-format.md
          Process:     references/spec-generation-skill.md
          Scoping:     references/topic-of-concern.md
@@ -313,7 +399,9 @@ Progress: 1/5 specs completed, 2 queued
 
 #### `status --verbose` output — Specifying section
 
-With `--verbose`, the full queue, completed list with eval history, and prior phase summaries are appended:
+With `--verbose`, the full queue, completed list with eval history, and prior phase summaries are appended.
+
+When `enable_eval_output: true`:
 
 ```
 --- Queue ---
@@ -328,24 +416,165 @@ With `--verbose`, the full queue, completed list with eval history, and prior ph
        Round 2: PASS — optimizer/specs/.eval/configuration-models-r2.md
 ```
 
+When `enable_eval_output: false`:
+
+```
+--- Queue ---
+
+  [4] Portal Rendering (portal)
+  [5] Portal Caching (portal)
+
+--- Completed ---
+
+  [1] Configuration Models (optimizer)  — 2 rounds
+       Round 1: FAIL
+       Round 2: PASS
+```
+
+#### `eval` output — Specifying EVALUATE
+
+When `enable_eval_output: true`:
+
+```
+=== SPEC EVALUATION ROUND 1/3 ===
+Domain: optimizer
+Batch:  1
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/spec-eval.md>
+
+--- SPECS TO EVALUATE ---
+
+[1] repository-loading.md
+    Topic: The scaffold loads repository snapshots for diffing.
+    File:  optimizer/specs/repository-loading.md
+
+[2] snapshot-diffing.md
+    Topic: The scaffold diffs repository snapshots to detect changes.
+    File:  optimizer/specs/snapshot-diffing.md
+
+[3] cache-invalidation.md
+    Topic: The scaffold invalidates cached data when specs change.
+    File:  optimizer/specs/cache-invalidation.md
+
+--- REPORT OUTPUT ---
+
+Write your evaluation report to:
+  optimizer/specs/.eval/batch-1-r1.md
+```
+
+Subsequent rounds with `enable_eval_output: true` include previous evaluations:
+
+```
+=== SPEC EVALUATION ROUND 2/3 ===
+...
+
+--- PREVIOUS EVALUATIONS ---
+
+Round 1: FAIL — optimizer/specs/.eval/batch-1-r1.md
+
+--- REPORT OUTPUT ---
+
+Write your evaluation report to:
+  optimizer/specs/.eval/batch-1-r2.md
+```
+
+When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives spec details and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
+
+```
+=== SPEC EVALUATION ROUND 1/3 ===
+Domain: optimizer
+Batch:  1
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/spec-eval.md>
+
+--- SPECS TO EVALUATE ---
+
+[1] repository-loading.md
+    Topic: The scaffold loads repository snapshots for diffing.
+    File:  optimizer/specs/repository-loading.md
+
+[2] snapshot-diffing.md
+    ...
+
+[3] cache-invalidation.md
+    ...
+```
+
+Subsequent rounds with `enable_eval_output: false`:
+
+```
+=== SPEC EVALUATION ROUND 2/3 ===
+...
+
+--- PREVIOUS EVALUATIONS ---
+
+Round 1: FAIL
+```
+
+#### `eval` output — CROSS_REFERENCE_EVAL
+
+When `enable_eval_output: true`:
+
+```
+=== CROSS-REFERENCE EVALUATION ROUND 1/2 ===
+Domain: optimizer
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/cross-reference-eval.md>
+
+--- SPECS IN DOMAIN ---
+
+[session — completed]
+  repository-loading.md   — optimizer/specs/repository-loading.md
+  snapshot-diffing.md      — optimizer/specs/snapshot-diffing.md
+  cache-invalidation.md    — optimizer/specs/cache-invalidation.md
+[existing — not in queue]
+  configuration-models.md  — optimizer/specs/configuration-models.md
+  telemetry-pipeline.md    — optimizer/specs/telemetry-pipeline.md
+
+--- REPORT OUTPUT ---
+
+Write your evaluation report to:
+  optimizer/specs/.eval/cross-reference-r1.md
+```
+
+When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` section is omitted.
+
+#### Eval Report Locations
+
+Specifying eval reports:
+```
+<domain>/specs/.eval/batch-N-rM.md
+<domain>/specs/.eval/cross-reference-rN.md
+```
+
 ### Rejection
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
 | `advance --verdict` outside of EVALUATE, CROSS_REFERENCE_EVAL | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
 | `advance` in specifying EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in specifying EVALUATE without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
-| `advance --verdict PASS` without `--message` when `enable_commits: true` | Error. Exit code 1. | Accepted specs need a commit message when commits are enabled |
+| `advance` in specifying EVALUATE without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
+| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
 | `advance` in CROSS_REFERENCE_EVAL without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in CROSS_REFERENCE_EVAL without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
+| `advance` in CROSS_REFERENCE_EVAL without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
 | `add-queue-item` outside of DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW | Error: "add-queue-item is only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW states (current state: \<state\>)." Exit code 1. | Queue modifications are restricted to states where the architect has sufficient context to identify gaps |
 | `add-queue-item` outside of specifying phase | Error: "add-queue-item is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Queue items are specs; only the specifying phase manages the spec queue |
-| `add-queue-item` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
 | `add-queue-item` with `--file` pointing to non-existent file | Error: "file \<path\> does not exist. add-queue-item registers specs that have already been written. Create the spec file first, then register it." Exit code 1. | The architect must write the spec before registering it; `add-queue-item` is for tracking existing work through evaluation, not queuing future work |
+| `add-queue-item` with `--file` not matching `<domain>/specs/<name>.md` | Error: "File path must follow \<domain\>/specs/\<name\>.md convention." Exit code 1. | Spec files must reside in a domain's specs/ directory |
+| `add-queue-item` without `--domain` and no matching domain found | Error: "No matching domain for file \<file\>. Use --domain to register a new domain." Exit code 1. | New domains require explicit `--domain` |
+| `add-queue-item` with `--domain` that does not match domain derived from `--file` | Error: "Domain in --domain (\<domain\>) does not match the domain in file \<file\> (\<derived\>)." Exit code 1. | Domain name and file path must agree |
+| `add-queue-item` with `--domain` introducing a domain whose path nests within or contains an existing domain path | Error: "Domain paths must not be nested: \<path1\> is a prefix of \<path2\>." Exit code 1. | Nested domain paths create ambiguity |
 | `set-roots` outside of CROSS_REFERENCE_REVIEW or DONE | Error: "set-roots is only valid in CROSS_REFERENCE_REVIEW or DONE states (current state: \<state\>)." Exit code 1. | Code search roots are collected at domain completion boundaries |
-| `set-roots` outside of specifying phase | Error: "set-roots is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Code search roots feed into the planning phase via the specifying→planning phase shift |
+| `set-roots` outside of specifying phase | Error: "set-roots is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Code search roots feed into the planning phase via the generate_planning_queue phase |
 | `set-roots` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
+| `eval` outside of specifying EVALUATE or CROSS_REFERENCE_EVAL | Error naming current state and phase. Exit code 1. | Eval context only available in evaluation states |
 
 ---
 
@@ -404,7 +633,7 @@ CROSS_REFERENCE → CROSS_REFERENCE_EVAL
 | ORIENT | always | SELECT | Pull next batch from queue into `current_specs`. Batch grouped by domain, up to `specifying.batch`. |
 | SELECT | always | DRAFT | — |
 | DRAFT | always | EVALUATE | Set round to 1. |
-| EVALUATE | `--verdict PASS`, round >= `specifying.eval.min_rounds` | ACCEPT | Record eval. TODO: Auto-commit with `--message` when `enable_commits: true` (not yet implemented). |
+| EVALUATE | `--verdict PASS`, round >= `specifying.eval.min_rounds` | ACCEPT | Record eval. |
 | EVALUATE | `--verdict PASS`, round < `specifying.eval.min_rounds` | REFINE | Record eval (PASS + eval report). Min rounds not met. |
 | EVALUATE | `--verdict FAIL`, round < `specifying.eval.max_rounds` | REFINE | Record eval (FAIL + eval report). |
 | EVALUATE | `--verdict FAIL`, round >= `specifying.eval.max_rounds` | ACCEPT | Record eval (FAIL + eval report). Forced acceptance. |
@@ -445,18 +674,28 @@ The scaffold does not read or write these files. This is a convention for the ar
 2. Validate the current state is DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW.
 3. Validate all required flags: `--name`, `--topic`, `--file`.
 4. Validate `--file` points to an existing file. If not: error with message instructing the architect to create the file first.
-5. Resolve domain: if `--domain` is provided, use it. Otherwise, infer from the current domain (current batch domain at DRAFT, cross-reference domain at CROSS_REFERENCE_REVIEW). At DONE, `--domain` is required (no current domain).
-6. Derive `domain_path` from the `--file` path (the directory two levels up from the file, e.g., `optimizer/specs/cache-eviction.md` → `optimizer/`). If the domain already exists in completed specs or queue, verify the derived `domain_path` matches.
-7. Validate `--name` is unique across both the queue and completed specs.
-8. Append the new entry to the end of `specifying.queue`.
-9. Write the state file.
-10. Print confirmation: spec name, domain, domain_path, and queue position.
+5. Validate `--file` matches `<something>/specs/<name>.md` pattern. If not: error `File path must follow <domain>/specs/<name>.md convention.`
+6. Derive domain from `--file`: extract the path prefix before `/specs/` (e.g., `domains/emails/specs/smtp-relay.md` → `domains/emails`).
+7. Resolve domain:
+   a. Check configured domains (`config.domains`): does any domain's `path` match the derived path?
+   b. If no configured domains, check session domains (queue + completed specs): does any existing domain path match?
+   c. **If `--domain` is omitted:**
+      - If a matching domain is found (configured or session): use it. Print `Added <name> to specifying queue for domain <domain_name>.`
+      - If no match: error `No matching domain for file <file>. Use --domain to register a new domain.`
+   d. **If `--domain` is provided:**
+      - Derive the domain name from the file path. If `--domain` does not match: error `Domain in --domain (<domain>) does not match the domain in file <file> (<derived_domain>).`
+      - If the domain exists (configured or session): use it.
+      - If the domain is new: validate the new domain path does not nest within or contain any existing domain path. Register as a session-only domain.
+8. Validate `--name` is unique across both the queue and completed specs.
+9. Append the new entry to the end of `specifying.queue`.
+10. Write the state file.
+11. Print confirmation: spec name, domain, domain_path, and queue position. E.g., `Added smtp-relay to specifying queue for domain emails.`
 
 When `add-queue-item` is used at DONE and the queue was previously empty, advancing from DONE re-enters ORIENT for the new items. After those items complete (including their domain's cross-reference), the scaffold returns to DONE. Reconciliation does not begin until the queue is empty again.
 
 ### Set Roots
 
-`forgectl set-roots` stores code search roots for a domain. These roots are used during plan-queue generation at the specifying→planning phase shift.
+`forgectl set-roots` stores code search roots for a domain. These roots are used during plan-queue generation in the generate_planning_queue phase.
 
 1. Validate the current phase is `specifying`.
 2. Validate the current state is CROSS_REFERENCE_REVIEW or DONE.
@@ -479,7 +718,7 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 4. **Min rounds enforced.** PASS below `specifying.eval.min_rounds` forces another cycle.
 5. **Max rounds enforced.** FAIL at `specifying.eval.max_rounds` forces acceptance.
 6. **Guided pauses.** When `config.general.user_guided` is true, SELECT output includes "STOP please review and discuss with user before continuing."
-7. **Commit gating.** `--message` is only required when `enable_commits` is `true`.
+7. **No commits during specifying lifecycle.** Individual eval rounds, refinements, and cross-referencing do not produce commits. The single specifying commit occurs at COMPLETE (see spec-reconciliation).
 8. **Domain cross-reference required.** Every domain passes through CROSS_REFERENCE before the next domain begins or DONE is reached.
 9. **Cross-reference scans all domain specs.** CROSS_REFERENCE discovers all `.md` files in `<domain_path>/specs/`, not just session specs.
 10. **Domain checkpoint fires once.** CROSS_REFERENCE_REVIEW is entered exactly once per domain (after the first passing CROSS_REFERENCE_EVAL), regardless of `user_review` setting.
@@ -509,9 +748,9 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
   - **Expected:** Batch contains all remaining specs for that domain.
   - **Rationale:** Batches are capped at `specifying.batch` but may be smaller. No padding occurs.
 
-- **Scenario:** `enable_commits` is `false` and architect provides `--message` at EVALUATE PASS.
-  - **Expected:** `--message` is ignored. No error.
-  - **Rationale:** The flag is optional when commits are disabled.
+- **Scenario:** `enable_commits` is `false` and architect provides `--message` at any specifying state.
+  - **Expected:** Warning printed: `--message is ignored, commits are not enabled`. Command proceeds. The warning does not instruct how to enable commits.
+  - **Rationale:** Users who do not need auto-commits should not be confused or prompted to change configuration.
 
 - **Scenario:** Domain has no existing specs outside the queue (all specs are new).
   - **Expected:** CROSS_REFERENCE lists only session specs under `[session — completed]`. `[existing — not in queue]` section is empty or omitted.
@@ -544,6 +783,26 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **Scenario:** `add-queue-item` called during DRAFT for a different domain than the current batch.
   - **Expected:** Item appended to queue. Current batch continues unaffected. The new item is processed when its domain comes up in queue order.
   - **Rationale:** Queue append does not disturb the current batch.
+
+- **Scenario:** `add-queue-item --file domains/emails/specs/smtp-relay.md` without `--domain`. Domain `emails` is configured in `[[domains]]`.
+  - **Expected:** Domain resolved to `emails`. Print: `Added smtp-relay to specifying queue for domain emails.`
+  - **Rationale:** Configured domains are matched by path prefix.
+
+- **Scenario:** `add-queue-item --file new-service/specs/auth.md` without `--domain`. No configured or session domain matches.
+  - **Expected:** Error: `No matching domain for file new-service/specs/auth.md. Use --domain to register a new domain.`
+  - **Rationale:** New domains require explicit intent via `--domain`.
+
+- **Scenario:** `add-queue-item --domain portal --file optimizer/specs/foo.md`.
+  - **Expected:** Error: `Domain in --domain (portal) does not match the domain in file optimizer/specs/foo.md (optimizer).`
+  - **Rationale:** Domain name and file path must agree to prevent misclassification.
+
+- **Scenario:** `add-queue-item --domain users-admin --file domains/users/admin/specs/roles.md`. Existing domain `users` has path `domains/users`.
+  - **Expected:** Error: `Domain paths must not be nested: domains/users is a prefix of domains/users/admin.`
+  - **Rationale:** Nested domains create ambiguity in file-to-domain resolution.
+
+- **Scenario:** `add-queue-item --file shared/lib/something.md`.
+  - **Expected:** Error: `File path must follow <domain>/specs/<name>.md convention.`
+  - **Rationale:** Spec files must reside in a domain's `specs/` directory.
 
 - **Scenario:** `add-queue-item` with `--file` pointing to a file that does not exist.
   - **Expected:** Error: "file <path> does not exist. add-queue-item registers specs that have already been written. Create the spec file first, then register it." Exit code 1.
@@ -611,17 +870,11 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md`
 - **Then:** State is ACCEPT.
 
-### PASS without message when enable_commits is false
-- **Verifies:** No commit message required when commits disabled.
+### --message ignored when enable_commits is false
+- **Verifies:** Warning printed when --message provided with commits disabled.
 - **Given:** EVALUATE, `enable_commits: false`.
-- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md` (no `--message`)
-- **Then:** State is ACCEPT. No error.
-
-### PASS without message when enable_commits is true
-- **Verifies:** Commit message required when commits enabled.
-- **Given:** EVALUATE, `enable_commits: true`.
-- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md` (no `--message`)
-- **Then:** Exit code 1.
+- **When:** `advance --verdict PASS --eval-report .eval/batch-1-r1.md --message "some message"`
+- **Then:** State is ACCEPT. Warning printed: `--message is ignored, commits are not enabled`. No error. Warning does not instruct how to enable commits.
 
 ### ACCEPT triggers CROSS_REFERENCE when domain complete
 - **Verifies:** Domain completion enters cross-reference before next domain.
@@ -695,11 +948,47 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **When:** `add-queue-item --name "Ghost Spec" --topic "..." --file optimizer/specs/does-not-exist.md`
 - **Then:** Exit code 1. Error instructs architect to create the file first.
 
-### add-queue-item derives domain_path from file
-- **Verifies:** domain_path derivation from --file path.
-- **Given:** DRAFT. File `optimizer/specs/cache-eviction.md` exists. Domain optimizer already has domain_path `optimizer/`.
+### add-queue-item resolves domain from configured domains
+- **Verifies:** Domain resolved from `[[domains]]` config by file path.
+- **Given:** DRAFT. `[[domains]]` has `name = "emails", path = "domains/emails"`. File `domains/emails/specs/smtp-relay.md` exists.
+- **When:** `add-queue-item --name "SMTP Relay" --topic "..." --file domains/emails/specs/smtp-relay.md`
+- **Then:** Queue entry has domain `emails`. Print: `Added SMTP Relay to specifying queue for domain emails.`
+
+### add-queue-item resolves domain from session domains
+- **Verifies:** Domain resolved from existing session domains when no config.
+- **Given:** DRAFT. No `[[domains]]` config. Domain `optimizer` exists in queue with path `optimizer/`. File `optimizer/specs/cache-eviction.md` exists.
 - **When:** `add-queue-item --name "Cache Eviction" --topic "..." --file optimizer/specs/cache-eviction.md`
-- **Then:** Queue entry has domain_path `optimizer/`. Matches existing domain.
+- **Then:** Queue entry has domain `optimizer`.
+
+### add-queue-item rejects unknown domain without --domain
+- **Verifies:** New domains require explicit --domain.
+- **Given:** DONE. File `new-service/specs/auth.md` exists. No matching domain.
+- **When:** `add-queue-item --name "Auth" --topic "..." --file new-service/specs/auth.md`
+- **Then:** Exit code 1. Error: `No matching domain for file new-service/specs/auth.md. Use --domain to register a new domain.`
+
+### add-queue-item registers new domain with --domain
+- **Verifies:** New session-only domain created.
+- **Given:** DONE. File `new-service/specs/auth.md` exists. No matching domain.
+- **When:** `add-queue-item --name "Auth" --domain new-service --topic "..." --file new-service/specs/auth.md`
+- **Then:** Queue entry has domain `new-service`. Domain registered in session. Config file not modified.
+
+### add-queue-item rejects --domain mismatch
+- **Verifies:** Domain name must match file path.
+- **Given:** DRAFT. File `optimizer/specs/foo.md` exists.
+- **When:** `add-queue-item --name "Foo" --domain portal --topic "..." --file optimizer/specs/foo.md`
+- **Then:** Exit code 1. Error names both domains.
+
+### add-queue-item rejects nested domain paths
+- **Verifies:** Nesting prevention.
+- **Given:** DONE. Domain `users` exists with path `domains/users`. File `domains/users/admin/specs/roles.md` exists.
+- **When:** `add-queue-item --name "Roles" --domain users-admin --topic "..." --file domains/users/admin/specs/roles.md`
+- **Then:** Exit code 1. Error: nesting.
+
+### add-queue-item rejects non-convention file path
+- **Verifies:** File must follow `<domain>/specs/<name>.md` convention.
+- **Given:** DRAFT. File `shared/lib/something.md` exists.
+- **When:** `add-queue-item --name "Something" --topic "..." --file shared/lib/something.md`
+- **Then:** Exit code 1. Error: file path convention.
 
 ### add-queue-item rejected outside valid states
 - **Verifies:** State gate enforcement.
@@ -767,7 +1056,7 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - Cross-reference discovers all `.md` files in `<domain_path>/specs/`
 - Cross-reference eval round enforcement (`specifying.cross_reference.min_rounds`/`max_rounds`)
 - Configurable CROSS_REFERENCE_REVIEW pause (`specifying.cross_reference.user_review`)
-- Commit gating via `enable_commits` configuration
-- `add-queue-item`: state-gated queue append (DRAFT, CROSS_REFERENCE_REVIEW, DONE)
+- No commits during specifying lifecycle (single commit at COMPLETE, see spec-reconciliation)
+- `add-queue-item`: state-gated queue append with domain resolution from configured domains, session domains, or explicit `--domain` (DRAFT, CROSS_REFERENCE_REVIEW, DONE)
 - `set-roots`: state-gated code search root collection per domain (CROSS_REFERENCE_REVIEW, DONE)
 - DONE re-enters ORIENT when queue is non-empty (supports late-added specs before reconciliation)

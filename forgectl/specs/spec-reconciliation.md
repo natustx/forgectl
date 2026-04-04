@@ -11,7 +11,7 @@ Domain-scoped cross-referencing (intra-domain consistency) is handled by CROSS_R
 
 Reconciliation has its own round configuration independent of the per-spec eval rounds. `specifying.reconciliation.min_rounds` (default 0) controls how many rounds must pass before a PASS verdict can complete the phase. `specifying.reconciliation.max_rounds` (default 3) caps the total reconciliation rounds to prevent infinite loops. When `specifying.reconciliation.min_rounds` is 0, a single PASS immediately completes — this is the default behavior.
 
-When `enable_commits` is `false` (default), `--message` is not required at RECONCILE_EVAL. When `enable_commits` is `true`, `--message` is required with PASS verdict. TODO: automatic git commit execution is not yet implemented.
+When `enable_commits` is `true`, the single specifying commit occurs at COMPLETE. The scaffold stages files using the configured `specifying.commit_strategy` (default: `all-specs`) and runs `git commit -m <message>`. The resulting hash is automatically registered on all completed specs. See `docs/auto-committing.md` for full auto-commit behavior and staging strategies.
 
 The scaffold does not spawn sub-agents. It outputs instructions telling the architect what to spawn. The architect (or the skill driving the session) is responsible for spawning them.
 
@@ -23,7 +23,8 @@ The scaffold does not spawn sub-agents. It outputs instructions telling the arch
 
 | Spec | Relationship |
 |------|-------------|
-| phase-transitions | COMPLETE state transitions to PHASE_SHIFT (specifying → planning) |
+| phase-transitions | COMPLETE state transitions to PHASE_SHIFT (specifying → generate_planning_queue) |
+| Reconciliation evaluation prompt (`evaluators/reconcile-eval.md`, embedded in binary) | Full instructions for the reconciliation evaluation sub-agent: cross-domain consistency checks, report format, verdict rules |
 | Reconciliation eval sub-agent | Runs `git diff --staged` and evaluates cross-domain consistency across all specs |
 
 ---
@@ -36,8 +37,15 @@ The scaffold does not spawn sub-agents. It outputs instructions telling the arch
 
 | State | Flags |
 |-------|-------|
-| RECONCILE_EVAL | `--verdict PASS\|FAIL`, `--eval-report <path>` (required), `--message <text>` (required with PASS when `enable_commits: true`) |
+| RECONCILE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
 | RECONCILE_REVIEW | (no flags) |
+| COMPLETE | `--message <text>` / `-m` (required when `enable_commits: true`) |
+
+#### `eval` command
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `eval` | none | Output full evaluation context for the sub-agent. Only valid in RECONCILE_EVAL. |
 
 ### Outputs
 
@@ -54,15 +62,26 @@ Action:  Cross-validate all specs across domains: verify Depends On entries,
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering RECONCILE_EVAL** (after RECONCILE):
+**Entering RECONCILE_EVAL** (after RECONCILE, `enable_eval_output: true`):
 
 ```
 State:   RECONCILE_EVAL
 Phase:   specifying
 Round:   1/3
 Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
-         The sub-agent runs git diff --staged and evaluates consistency across all specs.
+         The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+```
+
+**Entering RECONCILE_EVAL** (after RECONCILE, `enable_eval_output: false`):
+
+```
+State:   RECONCILE_EVAL
+Phase:   specifying
+Round:   1/3
+Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
+         The sub-agent should run: forgectl eval
+         After completion of the above, advance with --verdict PASS|FAIL
 ```
 
 **Entering RECONCILE_REVIEW** (after first RECONCILE_EVAL PASS >= min_rounds):
@@ -105,11 +124,75 @@ Action:  Reconciliation review complete.
 
 **Entering COMPLETE** (after RECONCILE_REVIEW, or RECONCILE_EVAL PASS on round > 1):
 
+When `enable_commits: true`:
+
+```
+State:   COMPLETE
+Phase:   specifying
+Specs:   5 completed, reconciled
+Action:  Specifying phase complete.
+         Advance with --message "your commit message" to commit and continue.
+```
+
+When `enable_commits: false`:
+
 ```
 State:   COMPLETE
 Phase:   specifying
 Specs:   5 completed, reconciled
 Action:  Specifying phase complete. Advance to continue.
+```
+
+#### `eval` output — RECONCILE_EVAL
+
+When `enable_eval_output: true`:
+
+```
+=== RECONCILIATION EVALUATION ROUND 1/3 ===
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/reconcile-eval.md>
+
+--- DOMAINS ---
+
+optimizer: 3 specs
+portal:    2 specs
+
+--- RECONCILIATION CONTEXT ---
+
+Run: git diff --staged
+
+--- REPORT OUTPUT ---
+
+Write your evaluation report to:
+  specs/.eval/reconciliation-r1.md
+```
+
+When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` section is omitted.
+
+```
+=== RECONCILIATION EVALUATION ROUND 1/3 ===
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/reconcile-eval.md>
+
+--- DOMAINS ---
+
+optimizer: 3 specs
+portal:    2 specs
+
+--- RECONCILIATION CONTEXT ---
+
+Run: git diff --staged
+```
+
+#### Eval Report Locations
+
+Reconciliation eval reports:
+```
+specs/.eval/reconciliation-rN.md
 ```
 
 ### Rejection
@@ -118,8 +201,11 @@ Action:  Specifying phase complete. Advance to continue.
 |-----------|--------|-----------|
 | `advance --verdict` outside of RECONCILE_EVAL | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
 | `advance` in RECONCILE_EVAL without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in RECONCILE_EVAL without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
+| `advance` in RECONCILE_EVAL without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
+| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
+| `advance` in COMPLETE without `--message` when `enable_commits: true` | Error. Exit code 1. | Commit message required for the specifying phase commit |
 | `add-queue-item` outside of RECONCILE_REVIEW within reconciliation | Error: "add-queue-item is only valid in RECONCILE_REVIEW during reconciliation (current state: \<state\>)." Exit code 1. | Queue modifications during reconciliation are restricted to the review checkpoint |
+| `eval` outside of RECONCILE_EVAL | Error naming current state and phase. Exit code 1. | Eval context only available in RECONCILE_EVAL |
 
 ---
 
@@ -151,14 +237,15 @@ DONE → RECONCILE → RECONCILE_EVAL
 |------------|-----------|----------|-------------|
 | DONE | always | RECONCILE | Initialize reconcile state with round 0. |
 | RECONCILE | always | RECONCILE_EVAL | Increment reconcile round. |
-| RECONCILE_EVAL | `--verdict PASS`, round >= `specifying.reconciliation.min_rounds`, round == 1 | RECONCILE_REVIEW | Record eval. Always enters RECONCILE_REVIEW on first passing eval. TODO: Auto-commit with `--message` when `enable_commits: true`. |
-| RECONCILE_EVAL | `--verdict PASS`, round >= `specifying.reconciliation.min_rounds`, round > 1 | COMPLETE | Record eval. TODO: Auto-commit with `--message` when `enable_commits: true`. |
+| RECONCILE_EVAL | `--verdict PASS`, round >= `specifying.reconciliation.min_rounds`, round == 1 | RECONCILE_REVIEW | Record eval. Always enters RECONCILE_REVIEW on first passing eval. |
+| RECONCILE_EVAL | `--verdict PASS`, round >= `specifying.reconciliation.min_rounds`, round > 1 | COMPLETE | Record eval. |
 | RECONCILE_EVAL | `--verdict PASS`, round < `specifying.reconciliation.min_rounds` | RECONCILE | Record eval (PASS). Min rounds not met. |
 | RECONCILE_EVAL | `--verdict FAIL`, round < `specifying.reconciliation.max_rounds` | RECONCILE | Record eval (FAIL). |
 | RECONCILE_EVAL | `--verdict FAIL`, round >= `specifying.reconciliation.max_rounds` | RECONCILE_REVIEW or COMPLETE | Record eval (FAIL). Forced. If round == 1: RECONCILE_REVIEW. Else: COMPLETE. |
 | RECONCILE_REVIEW | queue empty | COMPLETE | Advance to completion. |
 | RECONCILE_REVIEW | queue non-empty (via add-queue-item) | DONE | Re-enter DONE to process new specs. Reconciliation restarts after new specs complete. |
-| COMPLETE | always | PHASE_SHIFT | Set phase shift from specifying → planning. |
+| COMPLETE | `enable_commits: true` | PHASE_SHIFT | Stage files per `specifying.commit_strategy`, run `git commit -m <message>`, register hash on all completed specs. Set phase shift from specifying → generate_planning_queue. |
+| COMPLETE | `enable_commits: false` | PHASE_SHIFT | Set phase shift from specifying → generate_planning_queue. |
 
 ### Reconcile Evaluation Sub-Agent
 
@@ -182,7 +269,7 @@ Intra-domain consistency (specs within the same domain) is already verified by C
 2. **Reconcile min rounds enforced.** PASS below `specifying.reconciliation.min_rounds` routes back to RECONCILE, not COMPLETE.
 3. **Reconcile max rounds enforced.** FAIL at `specifying.reconciliation.max_rounds` forces COMPLETE to prevent indefinite loops.
 4. **Independent round config.** `specifying.reconciliation.*` is independent of `specifying.eval.*` and `specifying.cross_reference.*`.
-5. **Commit gating.** `--message` is only required when `enable_commits` is `true`.
+5. **Single specifying commit at COMPLETE.** When `enable_commits` is `true`, `--message` is required at COMPLETE and the scaffold auto-commits. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. The commit hash is automatically registered on all completed specs.
 6. **Cross-domain focus.** Reconciliation checks cross-domain boundaries. Intra-domain consistency is handled by CROSS_REFERENCE.
 7. **Reconciliation review fires once.** RECONCILE_REVIEW is entered exactly once after the first passing (or forced) RECONCILE_EVAL, regardless of `specifying.reconciliation.user_review`.
 8. **user_review controls output, not state entry.** When `user_review` is true, RECONCILE_REVIEW includes "STOP please review and discuss with user before continuing." When false, it says "Reconciliation review complete."
@@ -219,6 +306,14 @@ Intra-domain consistency (specs within the same domain) is already verified by C
 - **Scenario:** RECONCILE_REVIEW with `user_review: false`.
   - **Expected:** State entered. Action says "Reconciliation review complete." No user review prompt. add-queue-item available.
   - **Rationale:** Review checkpoint always fires for add-queue-item. user_review only controls the review prompt.
+
+- **Scenario:** COMPLETE with `enable_commits: true` and no files changed.
+  - **Expected:** Commit skipped. Notice printed. Advance to PHASE_SHIFT proceeds.
+  - **Rationale:** Empty commits are not created. See `docs/auto-committing.md`.
+
+- **Scenario:** COMPLETE with `enable_commits: false` and `--message` provided.
+  - **Expected:** Warning: `--message is ignored, commits are not enabled`. Command proceeds. The warning does not instruct how to enable commits.
+  - **Rationale:** Users who do not need auto-commits should not be confused or prompted to change configuration.
 
 ---
 
@@ -292,9 +387,33 @@ Intra-domain consistency (specs within the same domain) is already verified by C
 
 ### COMPLETE transitions to PHASE_SHIFT
 - **Verifies:** Reconciliation completion triggers phase transition.
-- **Given:** COMPLETE.
+- **Given:** COMPLETE, `enable_commits: false`.
 - **When:** `advance`
 - **Then:** State is PHASE_SHIFT.
+
+### COMPLETE auto-commits when enable_commits is true
+- **Verifies:** Single specifying commit at COMPLETE.
+- **Given:** COMPLETE, `enable_commits: true`, `specifying.commit_strategy: "all-specs"`. Spec files modified.
+- **When:** `advance --message "Complete specifying phase"`
+- **Then:** Files staged per `all-specs` strategy. `git commit` executed. Hash registered on all completed specs. State is PHASE_SHIFT.
+
+### COMPLETE rejects missing --message when enable_commits is true
+- **Verifies:** Commit message required.
+- **Given:** COMPLETE, `enable_commits: true`.
+- **When:** `advance` (no `--message`)
+- **Then:** Exit code 1.
+
+### COMPLETE ignores --message when enable_commits is false
+- **Verifies:** Warning printed, command proceeds.
+- **Given:** COMPLETE, `enable_commits: false`.
+- **When:** `advance --message "ignored"`
+- **Then:** Warning: `--message is ignored, commits are not enabled`. State is PHASE_SHIFT. Warning does not instruct how to enable commits.
+
+### COMPLETE skips commit when no files changed
+- **Verifies:** Empty commits are not created.
+- **Given:** COMPLETE, `enable_commits: true`. No spec files modified.
+- **When:** `advance --message "no changes"`
+- **Then:** Commit skipped. Notice printed. State is PHASE_SHIFT.
 
 ---
 
@@ -304,4 +423,4 @@ Intra-domain consistency (specs within the same domain) is already verified by C
 - RECONCILE_REVIEW checkpoint after first passing/forced eval (always fires, regardless of user_review)
 - add-queue-item at RECONCILE_REVIEW for cross-domain gaps (re-enters DONE to process new specs)
 - Independent reconciliation round configuration (`specifying.reconciliation.min_rounds`, `specifying.reconciliation.max_rounds`)
-- Commit gating via `enable_commits` configuration
+- Single specifying commit at COMPLETE with auto-staging per `specifying.commit_strategy` and automatic hash registration

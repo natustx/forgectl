@@ -135,7 +135,7 @@ The `validate` command does not read or require `forgectl-state.json`. It does n
 
 ### Path Resolution
 
-For plan.json validation, relative paths in `refs[].path` and `items[].ref` are resolved relative to the directory containing the validated file (same behavior as during `init` and phase shifts).
+For plan.json validation, relative paths in `refs[].path` and `items[].refs` are resolved relative to the directory containing the validated file — i.e., `<domain>/<workspace_dir>/implementation_plan/` (same behavior as during `init` and phase shifts). Paths in `items[].files` and `items[].specs` are resolved relative to the project root.
 
 ---
 
@@ -224,11 +224,11 @@ For plan.json validation, relative paths in `refs[].path` and `items[].ref` are 
 - **When:** `forgectl validate spec-queue.json`
 - **Then:** Validation passes. Exit code 0.
 
-### Plan path resolution
-- **Verifies:** Relative paths resolved from plan.json directory.
+### Plan path resolution for refs
+- **Verifies:** Relative paths in refs resolved from plan.json directory.
 - **Given:** plan.json in `launcher/.forge_workspace/implementation_plan/` with `refs[0].path: "notes/auth.md"`. File exists at `launcher/.forge_workspace/implementation_plan/notes/auth.md`.
 - **When:** `forgectl validate launcher/.forge_workspace/implementation_plan/plan.json`
-- **Then:** Validation passes. Path resolved correctly.
+- **Then:** Validation passes. Path resolved from plan.json directory.
 
 ---
 

@@ -9,7 +9,7 @@ The `init` command creates a new `forgectl-state.json` from a user-provided inpu
 
 All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are limited to `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
 
-Sessions can begin at any of the three phases, allowing users to skip earlier phases when inputs already exist.
+Sessions can begin at any of three phases — specifying, planning, or implementing — allowing users to skip earlier phases when inputs already exist. The generate_planning_queue phase cannot be initialized directly; it requires a completed specifying phase.
 
 ## Depends On
 - **state-persistence** — provides the write mechanism and file layout for the state file.
@@ -121,10 +121,11 @@ The scaffold exits with a non-zero code on validation failure.
 |-----------|--------|-----------|
 | `.forgectl/` directory not found in hierarchy | Error: "No .forgectl directory found." Exit code 1. | Project root must be established |
 | `.forgectl/config` missing or unparseable | Error with parse details. Exit code 1. | Config must exist and be valid TOML |
-| Config constraint violation (e.g., eval.min_rounds > eval.max_rounds) | Error listing violations. Exit code 1. | Invalid configuration |
+| Config constraint violation (e.g., eval.min_rounds > eval.max_rounds, invalid commit_strategy, nested domain paths) | Error listing violations. Exit code 1. | Invalid configuration |
 | `init` called when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
 | `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | User needs to see what's wrong |
-| `--phase` not one of the three values | Error: "--phase must be specifying, planning, or implementing." Exit code 1. | Invalid phase |
+| `--phase` not one of the three valid values | Error: "--phase must be specifying, planning, or implementing." Exit code 1. | Invalid phase |
+| `--phase generate_planning_queue` | Error: "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." Exit code 1. | Cannot initialize mid-lifecycle phase directly |
 
 ---
 
@@ -137,7 +138,7 @@ The scaffold exits with a non-zero code on validation failure.
 - `.forgectl/config` exists and contains valid TOML.
 - No state file exists at the configured `state_dir` location.
 - `--from` is provided.
-- `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`).
+- `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`). `generate_planning_queue` is not valid.
 
 #### Steps
 1. Walk up the directory hierarchy to find `.forgectl/`. This establishes the project root.
@@ -186,6 +187,26 @@ The `init` command accepts only two flags:
 | `--from <path>` | none (required) | Path to input file (schema varies by `--phase`) |
 | `--phase` | specifying | Starting phase: `specifying`, `planning`, `implementing` |
 
+The optional `[[domains]]` section in `.forgectl/config` declares known domains:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `domains[].name` | string | yes | Domain name (used in spec queue `domain` field) |
+| `domains[].path` | string | yes | Domain directory path relative to project root |
+
+Validation at init:
+- No domain path is a prefix of another domain path. E.g., `domains/users` and `domains/users/employees` is rejected. Error: `Domain paths must not be nested: <path1> is a prefix of <path2>.`
+- When `--phase specifying`: each spec queue entry's `domain` must match a configured domain name (if domains are configured). The spec's `file` path must start with the domain's `path` + `/specs/`.
+- Domains are optional. If no `[[domains]]` section exists, domain resolution falls back to deriving from file paths.
+
+The `commit_strategy` per phase is validated at init:
+
+| Parameter | Type | Default | Constraint |
+|-----------|------|---------|------------|
+| `specifying.commit_strategy` | string | `all-specs` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
+| `planning.commit_strategy` | string | `strict` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
+| `implementing.commit_strategy` | string | `scoped` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
+
 The `[logs]` section in `.forgectl/config` is validated at init:
 
 | Parameter | Type | Default | Constraint |
@@ -223,6 +244,18 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 - **Scenario:** `.forgectl/` found two levels up from current directory.
   - **Expected:** Project root is the directory containing `.forgectl/`. All relative paths resolve from there.
   - **Rationale:** The scaffold supports working from any subdirectory within the project.
+
+- **Scenario:** `[[domains]]` config has two domains with nested paths (e.g., `domains/users` and `domains/users/employees`).
+  - **Expected:** Config validation error: `Domain paths must not be nested: domains/users is a prefix of domains/users/employees.` Exit code 1.
+  - **Rationale:** Nested domain paths create ambiguity in domain resolution from file paths.
+
+- **Scenario:** Spec queue entry references domain `emails` but no `[[domains]]` entry with that name exists.
+  - **Expected:** Error listing the unrecognized domain. Exit code 1.
+  - **Rationale:** When domains are configured, all spec queue domains must match. Unconfigured domains are rejected at the boundary.
+
+- **Scenario:** No `[[domains]]` section in config. Spec queue has multiple domains.
+  - **Expected:** Init succeeds. Domain paths are derived from spec file paths.
+  - **Rationale:** Domain configuration is optional. Without it, domain resolution falls back to file path derivation.
 
 ---
 
