@@ -134,9 +134,38 @@
 
 
   ═══════════════════════════════════════════════════════════════════════════
-  EVAL REPORT LOCATIONS
+  enable_eval_output CONFIGURATION
   ═══════════════════════════════════════════════════════════════════════════
 
-  Specifying:    <project>/specs/.eval/<spec-name>-rN.md
+  The per-phase enable_eval_output config flag controls whether eval sub-agents
+  write reports to files or communicate verdicts verbally.
+  Configured at: [specifying.eval], [planning.eval], [implementing.eval]
+
+  When enable_eval_output: true (not default)
+  ────────────────────────────────────────
+  - EVALUATE output includes: "After completion, advance with
+    --verdict PASS|FAIL --eval-report <path>"
+  - REFINE output includes the eval report path to study
+  - forgectl advance requires --eval-report <path>
+  - Report written to disk and stored as reference
+
+  When enable_eval_output: false
+  ──────────────────────────────
+  - EVALUATE output includes: "After completion, advance with --verdict PASS|FAIL"
+  - REFINE output says "Make corrections based off communication with the evaluator"
+  - forgectl advance requires only --verdict (no --eval-report)
+  - No report file written; verdict communicated directly by sub-agent
+
+  Both modes:
+  - forgectl eval outputs full evaluator context (embedded evaluator prompts)
+  - --eval-report flag accepted but ignored when enable_eval_output: false
+    (warning printed: "--eval-report is ignored, eval output is not enabled")
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  EVAL REPORT LOCATIONS  (when enable_eval_output: true)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Specifying:    <domain>/specs/.eval/batch-N-rN.md
   Planning:      <domain>/.forge_workspace/implementation_plan/evals/round-N.md
   Implementing:  <domain>/.forge_workspace/implementation_plan/evals/batch-N-round-M.md

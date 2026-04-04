@@ -15,7 +15,6 @@ func TestInitDefaultsToSpecifyingPhase(t *testing.T) {
 	s := &ForgeState{
 		Phase:          PhaseSpecifying,
 		State:          StateOrient,
-		Config:         makeTestConfig(2, 1, 3),
 		StartedAtPhase: PhaseSpecifying,
 		Specifying: NewSpecifyingState([]SpecQueueEntry{
 			{Name: "Spec1", Domain: "test", Topic: "t", File: "spec1.md", PlanningSources: []string{}, DependsOn: []string{}},
@@ -37,7 +36,6 @@ func TestInitAtPlanningPhase(t *testing.T) {
 	s := &ForgeState{
 		Phase:          PhasePlanning,
 		State:          StateOrient,
-		Config:         makeTestConfig(2, 1, 3),
 		StartedAtPhase: PhasePlanning,
 		Planning: NewPlanningState([]PlanQueueEntry{
 			{Name: "Plan1", Domain: "test", File: "plan.json", Specs: []string{}, SpecCommits: []string{}, CodeSearchRoots: []string{}},
@@ -54,8 +52,8 @@ func TestInitAtPlanningPhase(t *testing.T) {
 
 // --- Specifying Phase Tests ---
 
-func makeTestConfig(batchSize, minRounds, maxRounds int) Config {
-	cfg := DefaultConfig()
+func makeTestConfig(batchSize, minRounds, maxRounds int) ForgeConfig {
+	cfg := DefaultForgeConfig()
 	cfg.Implementing.Batch = batchSize
 	cfg.Implementing.Eval.MinRounds = minRounds
 	cfg.Implementing.Eval.MaxRounds = maxRounds
@@ -79,9 +77,13 @@ func newSpecifyingState(numSpecs int) *ForgeState {
 		})
 	}
 	return &ForgeState{
-		Phase:      PhaseSpecifying,
-		State:      StateOrient,
-		Config:     makeTestConfig(2, 1, 3),
+		Phase: PhaseSpecifying,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Specifying: NewSpecifyingState(specs),
 	}
 }
@@ -215,8 +217,11 @@ func TestSpecifyingPassMessageNotRequiredWithoutEnableCommits(t *testing.T) {
 }
 
 func TestSpecifyingPassRequiresMessageWhenEnableCommits(t *testing.T) {
+	// Per spec, --message is required at COMPLETE (not EVALUATE) when enable_commits=true.
+	// At EVALUATE, PASS with eval-report should succeed and advance to ACCEPT.
 	s := newSpecifyingState(1)
 	s.Config.General.EnableCommits = true
+	s.Config.Specifying.Eval.EnableEvalOutput = true
 	advanceToEvaluate(t, s)
 
 	dir := t.TempDir()
@@ -224,8 +229,11 @@ func TestSpecifyingPassRequiresMessageWhenEnableCommits(t *testing.T) {
 	os.WriteFile(evalFile, []byte("eval"), 0644)
 
 	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
-	if err == nil {
-		t.Error("expected error for missing --message with PASS when enable_commits is true")
+	if err != nil {
+		t.Errorf("EVALUATE PASS with eval-report should succeed: %v", err)
+	}
+	if s.State != StateAccept {
+		t.Errorf("expected ACCEPT after PASS at min_rounds, got %s", s.State)
 	}
 }
 
@@ -421,8 +429,10 @@ func TestCrossReferenceFlow(t *testing.T) {
 }
 
 func TestCrossReferenceEvalRequiresVerdictAndReport(t *testing.T) {
-	// CROSS_REFERENCE_EVAL must reject advance without verdict or eval-report.
+	// CROSS_REFERENCE_EVAL must reject advance without verdict.
+	// eval-report is required only when enable_eval_output=true.
 	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true
 	advanceToAccept(t, s)
 	Advance(s, AdvanceInput{}, "")  // ACCEPT → CROSS_REFERENCE
 	Advance(s, AdvanceInput{}, "")  // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
@@ -433,10 +443,10 @@ func TestCrossReferenceEvalRequiresVerdictAndReport(t *testing.T) {
 		t.Error("expected error for missing --verdict in CROSS_REFERENCE_EVAL")
 	}
 
-	// Verdict present but missing eval-report.
+	// Verdict present but missing eval-report (enable_eval_output=true).
 	err = Advance(s, AdvanceInput{Verdict: "PASS"}, "")
 	if err == nil {
-		t.Error("expected error for missing --eval-report in CROSS_REFERENCE_EVAL")
+		t.Error("expected error for missing --eval-report in CROSS_REFERENCE_EVAL when enable_eval_output=true")
 	}
 }
 
@@ -723,16 +733,17 @@ func TestReconcileFlowFailThenFix(t *testing.T) {
 }
 
 func TestReconcileEvalRequiresEvalReport(t *testing.T) {
-	// RECONCILE_EVAL must reject advance without --eval-report.
+	// RECONCILE_EVAL must reject advance without --eval-report when enable_eval_output=true.
 	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true
 	advanceToDone(t, s)
 	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 
-	// Missing eval-report.
+	// Missing eval-report with enable_eval_output=true.
 	err := Advance(s, AdvanceInput{Verdict: "PASS"}, "")
 	if err == nil {
-		t.Error("expected error for missing --eval-report in RECONCILE_EVAL")
+		t.Error("expected error for missing --eval-report in RECONCILE_EVAL when enable_eval_output=true")
 	}
 }
 
@@ -930,9 +941,11 @@ func TestReconcileReviewNonEmptyQueueToDone(t *testing.T) {
 }
 
 func TestReconcileEvalMessageRequiredWhenEnableCommits(t *testing.T) {
-	// --message required at RECONCILE_EVAL PASS when enable_commits=true.
+	// Per spec, --message is required at COMPLETE (not RECONCILE_EVAL) when enable_commits=true.
+	// RECONCILE_EVAL PASS should succeed without --message.
 	s := newSpecifyingState(1)
 	s.Config.General.EnableCommits = true
+	s.Config.Specifying.Eval.EnableEvalOutput = true
 	advanceToDone(t, s)
 
 	dir := t.TempDir()
@@ -942,10 +955,10 @@ func TestReconcileEvalMessageRequiredWhenEnableCommits(t *testing.T) {
 	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 
-	// PASS without --message should fail when enable_commits=true.
+	// PASS with eval-report should succeed (--message not required at RECONCILE_EVAL).
 	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
-	if err == nil {
-		t.Error("expected error for missing --message when enable_commits=true")
+	if err != nil {
+		t.Errorf("RECONCILE_EVAL PASS should not require --message: %v", err)
 	}
 }
 
@@ -1022,160 +1035,42 @@ func TestCompleteToPhaseShift(t *testing.T) {
 	if s.State != StatePhaseShift {
 		t.Errorf("expected PHASE_SHIFT, got %s", s.State)
 	}
-	if s.PhaseShift == nil || s.PhaseShift.From != PhaseSpecifying || s.PhaseShift.To != PhasePlanning {
-		t.Error("phase shift should be specifying → planning")
+	if s.PhaseShift == nil || s.PhaseShift.From != PhaseSpecifying || s.PhaseShift.To != PhaseGeneratePlanningQueue {
+		t.Error("phase shift should be specifying → generate_planning_queue")
 	}
 }
 
 // --- Phase Shift Tests ---
 
-func TestPhaseShiftSpecifyingToPlanningAutoGenerates(t *testing.T) {
-	// --from is optional; omitting it auto-generates the plan queue from completed specs.
-	s := &ForgeState{
-		Phase:  PhaseSpecifying,
-		State:  StatePhaseShift,
-		Config: makeTestConfig(2, 1, 3),
-		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
-		Specifying: &SpecifyingState{
-			Completed: []CompletedSpec{
-				{ID: 1, Name: "Spec1", Domain: "test", File: "test/specs/spec1.md", CommitHashes: []string{}},
-			},
-			Domains: map[string]DomainMeta{},
-		},
-	}
+func TestPhaseShiftSpecifyingAutoGeneratesQueue(t *testing.T) {
+	dir := t.TempDir()
+	s := newSpecifyingStateWithConfig(1, dir)
+	advanceToComplete(t, s)
+	Advance(s, AdvanceInput{}, dir) // COMPLETE → PHASE_SHIFT
 
-	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+	// Without --from: auto-generates plan queue, enters generate_planning_queue ORIENT.
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Phase != PhasePlanning {
-		t.Errorf("expected planning, got %s", s.Phase)
+	if s.Phase != PhaseGeneratePlanningQueue {
+		t.Errorf("expected generate_planning_queue phase, got %s", s.Phase)
 	}
 	if s.State != StateOrient {
 		t.Errorf("expected ORIENT, got %s", s.State)
 	}
-	if s.Planning == nil || s.Planning.CurrentPlan == nil {
-		t.Fatal("expected current plan to be populated")
-	}
-	if s.Planning.CurrentPlan.Domain != "test" {
-		t.Errorf("expected domain 'test', got %s", s.Planning.CurrentPlan.Domain)
-	}
-	wantRoots := []string{"test/"}
-	if len(s.Planning.CurrentPlan.CodeSearchRoots) != 1 || s.Planning.CurrentPlan.CodeSearchRoots[0] != wantRoots[0] {
-		t.Errorf("expected roots %v, got %v", wantRoots, s.Planning.CurrentPlan.CodeSearchRoots)
+	if s.GeneratePlanningQueue == nil || s.GeneratePlanningQueue.PlanQueueFile == "" {
+		t.Error("expected GeneratePlanningQueue.PlanQueueFile to be set")
 	}
 }
 
-func TestPhaseShiftAutoGeneratesTwoDomains(t *testing.T) {
-	// Two domains: optimizer has set-roots, portal uses default.
-	s := &ForgeState{
-		Phase:  PhaseSpecifying,
-		State:  StatePhaseShift,
-		Config: makeTestConfig(2, 1, 3),
-		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
-		Specifying: &SpecifyingState{
-			Completed: []CompletedSpec{
-				{ID: 1, Name: "Optimizer Spec 1", Domain: "optimizer", File: "optimizer/specs/s1.md"},
-				{ID: 2, Name: "Optimizer Spec 2", Domain: "optimizer", File: "optimizer/specs/s2.md"},
-				{ID: 3, Name: "Portal Spec 1", Domain: "portal", File: "portal/specs/s1.md"},
-				{ID: 4, Name: "Portal Spec 2", Domain: "portal", File: "portal/specs/s2.md"},
-			},
-			Domains: map[string]DomainMeta{
-				"optimizer": {CodeSearchRoots: []string{"optimizer/", "lib/shared/"}},
-			},
-		},
-	}
-
-	if err := Advance(s, AdvanceInput{}, ""); err != nil {
-		t.Fatal(err)
-	}
-	if s.Phase != PhasePlanning {
-		t.Fatalf("expected planning, got %s", s.Phase)
-	}
-	// First plan should be optimizer with custom roots.
-	plan := s.Planning.CurrentPlan
-	if plan.Domain != "optimizer" {
-		t.Errorf("expected optimizer domain, got %s", plan.Domain)
-	}
-	if len(plan.CodeSearchRoots) != 2 || plan.CodeSearchRoots[0] != "optimizer/" || plan.CodeSearchRoots[1] != "lib/shared/" {
-		t.Errorf("expected custom roots for optimizer, got %v", plan.CodeSearchRoots)
-	}
-	// Queue should have portal with default root.
-	if len(s.Planning.Queue) != 1 {
-		t.Fatalf("expected 1 plan in queue, got %d", len(s.Planning.Queue))
-	}
-	portalPlan := s.Planning.Queue[0]
-	if portalPlan.Domain != "portal" {
-		t.Errorf("expected portal in queue, got %s", portalPlan.Domain)
-	}
-	if len(portalPlan.CodeSearchRoots) != 1 || portalPlan.CodeSearchRoots[0] != "portal/" {
-		t.Errorf("expected default roots for portal, got %v", portalPlan.CodeSearchRoots)
-	}
-}
-
-func TestPhaseShiftAutoGeneratesSpecCommits(t *testing.T) {
-	// Commit hashes from multiple specs in the same domain are deduplicated.
-	s := &ForgeState{
-		Phase:  PhaseSpecifying,
-		State:  StatePhaseShift,
-		Config: makeTestConfig(2, 1, 3),
-		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
-		Specifying: &SpecifyingState{
-			Completed: []CompletedSpec{
-				{ID: 1, Domain: "app", File: "app/specs/a.md", CommitHashes: []string{"7cede10", "8743b1d"}},
-				{ID: 2, Domain: "app", File: "app/specs/b.md", CommitHashes: []string{"8743b1d", "abc1234"}},
-			},
-			Domains: map[string]DomainMeta{},
-		},
-	}
-
-	if err := Advance(s, AdvanceInput{}, ""); err != nil {
-		t.Fatal(err)
-	}
-	plan := s.Planning.CurrentPlan
-	want := []string{"7cede10", "8743b1d", "abc1234"}
-	if len(plan.SpecCommits) != len(want) {
-		t.Fatalf("spec_commits = %v, want %v", plan.SpecCommits, want)
-	}
-	for i, c := range want {
-		if plan.SpecCommits[i] != c {
-			t.Errorf("spec_commits[%d] = %s, want %s", i, plan.SpecCommits[i], c)
-		}
-	}
-}
-
-func TestPhaseShiftSpecifyingToPlanningInvalidFromFails(t *testing.T) {
-	s := &ForgeState{
-		Phase:  PhaseSpecifying,
-		State:  StatePhaseShift,
-		Config: makeTestConfig(2, 1, 3),
-		PhaseShift: &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning},
-		Specifying: &SpecifyingState{
-			Completed: []CompletedSpec{
-				{ID: 1, Domain: "test", File: "test/specs/a.md"},
-			},
-		},
-	}
-
+func TestPhaseShiftSpecifyingWithFromSkipsGenqueue(t *testing.T) {
 	dir := t.TempDir()
-	invalidFile := filepath.Join(dir, "invalid.json")
-	os.WriteFile(invalidFile, []byte(`{"invalid": true}`), 0644)
-
-	err := Advance(s, AdvanceInput{From: invalidFile}, "")
-	if err == nil {
-		t.Error("expected validation error for invalid --from")
-	}
-	if s.State != StatePhaseShift {
-		t.Errorf("state should remain PHASE_SHIFT on invalid --from, got %s", s.State)
-	}
-}
-
-func TestPhaseShiftSpecifyingToPlanningWithValidQueue(t *testing.T) {
 	s := newSpecifyingState(1)
 	advanceToComplete(t, s)
-	Advance(s, AdvanceInput{}, "") // → PHASE_SHIFT
+	Advance(s, AdvanceInput{}, dir) // COMPLETE → PHASE_SHIFT
 
-	// Write a valid plan queue file.
-	dir := t.TempDir()
+	// With --from: skip genqueue, go straight to planning.
 	queueFile := filepath.Join(dir, "plans-queue.json")
 	input := PlanQueueInput{
 		Plans: []PlanQueueEntry{
@@ -1185,7 +1080,7 @@ func TestPhaseShiftSpecifyingToPlanningWithValidQueue(t *testing.T) {
 	data, _ := json.Marshal(input)
 	os.WriteFile(queueFile, data, 0644)
 
-	err := Advance(s, AdvanceInput{From: queueFile}, "")
+	err := Advance(s, AdvanceInput{From: queueFile}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,6 +1089,25 @@ func TestPhaseShiftSpecifyingToPlanningWithValidQueue(t *testing.T) {
 	}
 	if s.State != StateOrient {
 		t.Errorf("expected ORIENT, got %s", s.State)
+	}
+}
+
+func TestPhaseShiftSpecifyingWithInvalidFromRejected(t *testing.T) {
+	dir := t.TempDir()
+	s := newSpecifyingState(1)
+	advanceToComplete(t, s)
+	Advance(s, AdvanceInput{}, dir) // COMPLETE → PHASE_SHIFT
+
+	// With invalid --from: error, stays PHASE_SHIFT.
+	queueFile := filepath.Join(dir, "bad-queue.json")
+	os.WriteFile(queueFile, []byte(`{"plans": []}`), 0644) // empty plans — invalid
+
+	err := Advance(s, AdvanceInput{From: queueFile}, dir)
+	if err == nil {
+		t.Fatal("expected validation error for empty plans")
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("expected PHASE_SHIFT on error, got %s", s.State)
 	}
 }
 
@@ -1218,6 +1132,206 @@ func TestPhaseShiftGuidedSetting(t *testing.T) {
 	if s.Config.General.UserGuided != false {
 		t.Error("user_guided should be false after --no-guided at phase shift")
 	}
+}
+
+// --- Generate Planning Queue Phase Tests ---
+
+func TestGenqueueOrientToRefine(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateRefine {
+		t.Errorf("expected REFINE, got %s", s.State)
+	}
+}
+
+func TestGenqueueRefineWithInvalidQueueStaysRefine(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // → REFINE
+
+	// Write invalid plan-queue.json.
+	queuePath := filepath.Join(dir, s.GeneratePlanningQueue.PlanQueueFile)
+	os.MkdirAll(filepath.Dir(queuePath), 0755)
+	os.WriteFile(queuePath, []byte(`{"plans": []}`), 0644)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if s.State != StateRefine {
+		t.Errorf("expected REFINE on validation failure, got %s", s.State)
+	}
+}
+
+func TestGenqueueRefineWithValidQueueToPhaseShift(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // → REFINE
+
+	// Write valid plan-queue.json.
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("expected PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhaseGeneratePlanningQueue || s.PhaseShift.To != PhasePlanning {
+		t.Error("phase shift should be generate_planning_queue → planning")
+	}
+}
+
+func TestGenqueuePhaseShiftToPlanningWithoutFrom(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir)                       // → REFINE
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("expected planning phase, got %s", s.Phase)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT, got %s", s.State)
+	}
+	if s.Planning == nil || s.Planning.CurrentPlan == nil {
+		t.Error("expected planning state to be populated")
+	}
+}
+
+func TestGenqueuePhaseShiftToPlanningWithFromOverride(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // → REFINE
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
+
+	// Override with a different plan queue.
+	overrideFile := filepath.Join(dir, "override-queue.json")
+	input := PlanQueueInput{
+		Plans: []PlanQueueEntry{
+			{Name: "Override Plan", Domain: "override", File: "override/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"override/"}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	os.WriteFile(overrideFile, data, 0644)
+
+	err := Advance(s, AdvanceInput{From: overrideFile}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("expected planning phase, got %s", s.Phase)
+	}
+	if s.Planning == nil || s.Planning.CurrentPlan == nil || s.Planning.CurrentPlan.Domain != "override" {
+		t.Errorf("expected override domain in planning, got %v", s.Planning)
+	}
+}
+
+func TestAutoGeneratePlanQueueGroupsByDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := newSpecifyingStateWithConfig(0, dir)
+	s.Specifying = &SpecifyingState{
+		Completed: []CompletedSpec{
+			{ID: 1, Name: "Spec1", Domain: "alpha", File: "alpha/specs/a.md"},
+			{ID: 2, Name: "Spec2", Domain: "beta", File: "beta/specs/b.md"},
+			{ID: 3, Name: "Spec3", Domain: "alpha", File: "alpha/specs/c.md"},
+		},
+		Queue: []SpecQueueEntry{},
+	}
+
+	outPath, err := autoGeneratePlanQueue(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outPath == "" {
+		t.Fatal("expected non-empty output path")
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, outPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result PlanQueueInput
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Plans) != 2 {
+		t.Fatalf("expected 2 domain plans, got %d", len(result.Plans))
+	}
+	// Order: alpha first (first appearance), beta second.
+	if result.Plans[0].Domain != "alpha" {
+		t.Errorf("expected first domain alpha, got %s", result.Plans[0].Domain)
+	}
+	if result.Plans[1].Domain != "beta" {
+		t.Errorf("expected second domain beta, got %s", result.Plans[1].Domain)
+	}
+	// Alpha should have both its specs.
+	if len(result.Plans[0].Specs) != 2 {
+		t.Errorf("expected 2 specs for alpha, got %d", len(result.Plans[0].Specs))
+	}
+}
+
+func TestAutoGenerateUsesSetRoots(t *testing.T) {
+	dir := t.TempDir()
+	s := newSpecifyingStateWithConfig(0, dir)
+	s.Specifying = &SpecifyingState{
+		Completed: []CompletedSpec{
+			{ID: 1, Name: "Spec1", Domain: "mydom", File: "mydom/specs/a.md"},
+		},
+		Queue:       []SpecQueueEntry{},
+		Domains: map[string]DomainMeta{"mydom": {CodeSearchRoots: []string{"mydom/src/", "mydom/pkg/"}}},
+	}
+
+	outPath, err := autoGeneratePlanQueue(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, outPath))
+	var result PlanQueueInput
+	json.Unmarshal(data, &result)
+
+	if len(result.Plans[0].CodeSearchRoots) != 2 || result.Plans[0].CodeSearchRoots[0] != "mydom/src/" {
+		t.Errorf("expected configured roots, got %v", result.Plans[0].CodeSearchRoots)
+	}
+}
+
+// newGenqueueState creates a state already in generate_planning_queue ORIENT.
+func newGenqueueState(dir string) *ForgeState {
+	s := newSpecifyingStateWithConfig(1, dir)
+	// Set up a plan queue file path (not yet written).
+	s.Phase = PhaseGeneratePlanningQueue
+	s.State = StateOrient
+	s.GeneratePlanningQueue = &GeneratePlanningQueueState{
+		PlanQueueFile: ".forgectl/state/plan-queue.json",
+	}
+	return s
+}
+
+// writeValidPlanQueue writes a valid plan-queue.json to the state path.
+func writeValidPlanQueue(t *testing.T, dir, relPath string) {
+	t.Helper()
+	fullPath := filepath.Join(dir, relPath)
+	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	input := PlanQueueInput{
+		Plans: []PlanQueueEntry{
+			{Name: "Test Plan", Domain: "test", File: "test/plan.json", Specs: []string{"spec.md"}, CodeSearchRoots: []string{"test/"}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	os.WriteFile(fullPath, data, 0644)
 }
 
 // --- Planning Phase Tests ---
@@ -1353,6 +1467,7 @@ func TestPlanningValidateSucceedsToEvaluate(t *testing.T) {
 
 func TestSpecifyingEvalReportMustExist(t *testing.T) {
 	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true // require eval report
 	advanceToEvaluate(t, s)
 
 	err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: "/nonexistent/path.md"}, "")
@@ -1375,6 +1490,94 @@ func TestPlanningDraftSetsRoundTo1OnValidationFailure(t *testing.T) {
 	Advance(s, AdvanceInput{}, dir)
 	if s.Planning.Round != 1 {
 		t.Errorf("expected round 1 after DRAFT→VALIDATE, got %d", s.Planning.Round)
+	}
+}
+
+func TestPlanningSelfReviewEnabledValidateToSelfReviewToEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	s.Config.Planning.SelfReview = true
+
+	advancePlanningToDraft(t, s, "")
+
+	// Create invalid plan: DRAFT → VALIDATE.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+	Advance(s, AdvanceInput{}, dir)
+	if s.State != StateValidate {
+		t.Fatalf("expected VALIDATE, got %s", s.State)
+	}
+
+	// Fix plan: VALIDATE → SELF_REVIEW.
+	createValidPlan(t, dir, s.Planning.CurrentPlan.File)
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateSelfReview {
+		t.Fatalf("expected SELF_REVIEW, got %s", s.State)
+	}
+
+	// SELF_REVIEW → EVALUATE.
+	err = Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s", s.State)
+	}
+}
+
+func TestPlanningSelfReviewDisabledValidateToEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	s.Config.Planning.SelfReview = false
+
+	advancePlanningToDraft(t, s, "")
+
+	// Create invalid plan: DRAFT → VALIDATE.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+	Advance(s, AdvanceInput{}, dir)
+
+	// Fix plan: VALIDATE → EVALUATE (skips SELF_REVIEW).
+	createValidPlan(t, dir, s.Planning.CurrentPlan.File)
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s", s.State)
+	}
+}
+
+func TestPlanningSelfReviewInvalidPlanEntersValidate(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	s.Config.Planning.SelfReview = true
+
+	advancePlanningToDraft(t, s, "")
+	createValidPlan(t, dir, s.Planning.CurrentPlan.File)
+
+	// DRAFT → SELF_REVIEW (valid plan, self_review=true).
+	Advance(s, AdvanceInput{}, dir)
+	if s.State != StateSelfReview {
+		t.Fatalf("expected SELF_REVIEW, got %s", s.State)
+	}
+
+	// Agent invalidates plan.json during review.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+
+	// SELF_REVIEW → VALIDATE (invalid plan).
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if s.State != StateValidate {
+		t.Errorf("expected VALIDATE, got %s", s.State)
 	}
 }
 
@@ -1430,6 +1633,26 @@ func TestPlanningAcceptToPhaseShift(t *testing.T) {
 	}
 }
 
+// --- Multi-Plan Phase Transition Tests ---
+
+func TestPlanningAcceptInterleavedGoesToImplementing(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	// Default: PlanAllBeforeImplementing=false.
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StatePhaseShift {
+		t.Fatalf("expected PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhasePlanning || s.PhaseShift.To != PhaseImplementing {
+		t.Errorf("expected planning→implementing, got %v", s.PhaseShift)
+	}
+}
+
 func TestPlanningAcceptNoMessageRequiredWithoutEnableCommits(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir)
@@ -1454,6 +1677,246 @@ func TestPlanningAcceptRequiresMessageWhenEnableCommits(t *testing.T) {
 	err := Advance(s, AdvanceInput{}, dir) // no --message
 	if err == nil {
 		t.Error("expected error in planning ACCEPT when enable_commits=true and no --message")
+	}
+}
+
+func TestPlanningAcceptAllFirstWithQueueGoesToPlanningPlanning(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithTwoPlans(dir)
+	s.Config.Planning.PlanAllBeforeImplementing = true
+	advancePlanningToAccept(t, s, dir) // accepts plan1
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StatePhaseShift {
+		t.Fatalf("expected PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhasePlanning || s.PhaseShift.To != PhasePlanning {
+		t.Errorf("expected planning→planning, got %v", s.PhaseShift)
+	}
+	if s.Planning.CurrentPlan == nil || s.Planning.CurrentPlan.Name != "Plan2" {
+		t.Errorf("expected Plan2 as current, got %v", s.Planning.CurrentPlan)
+	}
+	if len(s.Planning.Completed) != 1 || s.Planning.Completed[0].Domain != "test" {
+		t.Errorf("expected 1 completed plan (test domain), got %v", s.Planning.Completed)
+	}
+}
+
+func TestPlanningAcceptAllFirstLastPlanGoesToImplementing(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir) // single plan, no queue
+	s.Config.Planning.PlanAllBeforeImplementing = true
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StatePhaseShift {
+		t.Fatalf("expected PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhasePlanning || s.PhaseShift.To != PhaseImplementing {
+		t.Errorf("expected planning→implementing, got %v", s.PhaseShift)
+	}
+	if len(s.Planning.Completed) != 1 {
+		t.Errorf("expected 1 completed plan, got %d", len(s.Planning.Completed))
+	}
+}
+
+func TestPhaseShiftPlanningToPlanningResetsRound(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithTwoPlans(dir)
+	s.Config.Planning.PlanAllBeforeImplementing = true
+	advancePlanningToAccept(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // ACCEPT → PHASE_SHIFT(planning→planning)
+
+	// Advance through phase shift.
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("expected planning phase, got %s", s.Phase)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT, got %s", s.State)
+	}
+	if s.Planning.Round != 0 {
+		t.Errorf("expected round reset to 0, got %d", s.Planning.Round)
+	}
+}
+
+func TestPhaseShiftPlanningToImplementingSetsCurrentPlanFile(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	advancePlanningToAccept(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // ACCEPT → PHASE_SHIFT(planning→implementing)
+
+	// Set up the plan.json.
+	createValidPlan(t, dir, "impl/plan.json")
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhaseImplementing {
+		t.Errorf("expected implementing phase, got %s", s.Phase)
+	}
+	if s.Implementing == nil || s.Implementing.CurrentPlanFile != "impl/plan.json" {
+		t.Errorf("expected CurrentPlanFile=impl/plan.json, got %v", s.Implementing)
+	}
+}
+
+func TestImplementingDoneInterleavedWithRemainingPlansToPlanning(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingStateWithPlanningQueue(dir, 1, 1)
+
+	// Complete the implementing phase.
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE
+
+	if s.State != StatePhaseShift {
+		t.Fatalf("expected PHASE_SHIFT after DONE with plans in queue, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhaseImplementing || s.PhaseShift.To != PhasePlanning {
+		t.Errorf("expected implementing→planning, got %v", s.PhaseShift)
+	}
+}
+
+func TestPhaseShiftImplementingToPlanningPopsPlan(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingStateWithPlanningQueue(dir, 1, 1)
+
+	// Reach DONE with plans remaining.
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE (now PHASE_SHIFT)
+
+	// Advance through phase shift.
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("expected planning phase, got %s", s.Phase)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT, got %s", s.State)
+	}
+	if s.Planning.CurrentPlan == nil {
+		t.Error("expected Planning.CurrentPlan to be set")
+	}
+}
+
+func TestImplementingDoneAllFirstWithRemainingToImplementing(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingStateWithPlanQueue(dir, 1, 1)
+	s.Config.Planning.PlanAllBeforeImplementing = true
+
+	// Complete implementing phase.
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE (→ PHASE_SHIFT)
+
+	if s.State != StatePhaseShift {
+		t.Fatalf("expected PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil || s.PhaseShift.From != PhaseImplementing || s.PhaseShift.To != PhaseImplementing {
+		t.Errorf("expected implementing→implementing, got %v", s.PhaseShift)
+	}
+}
+
+func TestPlanningDoneRejectsFlags(t *testing.T) {
+	s := newPlanningState()
+	s.State = StateDone
+
+	err := Advance(s, AdvanceInput{Verdict: "PASS"}, "")
+	if err == nil {
+		t.Error("expected error for flags in planning DONE state")
+	}
+	if err != nil && err.Error() != "DONE is a pass-through state. No flags accepted." {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestImplementingDoneNoPlansIsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// No planning queue, PlanAllBeforeImplementing=false.
+
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE (terminal)
+
+	// DONE with no plans should return error.
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Error("expected terminal error from DONE with no plans")
+	}
+}
+
+// newPlanningStateWithTwoPlans creates a planning state with plan1 as current and plan2 in queue.
+func newPlanningStateWithTwoPlans(dir string) *ForgeState {
+	s := newPlanningStateWithDir(dir) // plan1 as CurrentPlan
+	s.Planning.Queue = []PlanQueueEntry{
+		{Name: "Plan2", Domain: "test2", File: "impl2/plan.json", Specs: []string{"spec2.md"}, CodeSearchRoots: []string{"test2/"}},
+	}
+	return s
+}
+
+// newImplementingStateWithPlanningQueue creates an implementing state with plans in Planning.Queue (interleaved mode).
+func newImplementingStateWithPlanningQueue(dir string, numItems, batchSize int) *ForgeState {
+	s := newImplementingState(dir, numItems, batchSize)
+	// Preserve Planning.CurrentPlan, just add to the Queue.
+	s.Planning.Queue = []PlanQueueEntry{
+		{Name: "Next Plan", Domain: "next", File: "next/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"next/"}},
+	}
+	return s
+}
+
+// newImplementingStateWithPlanQueue creates an implementing state with plans in Implementing.PlanQueue (all-first mode).
+func newImplementingStateWithPlanQueue(dir string, numItems, batchSize int) *ForgeState {
+	s := newImplementingState(dir, numItems, batchSize)
+
+	// Create a valid plan.json for the next plan.
+	nextPlanFile := "next/plan.json"
+	notesDir := filepath.Join(dir, "next", "notes")
+	os.MkdirAll(notesDir, 0755)
+	os.WriteFile(filepath.Join(notesDir, "n.md"), []byte("notes"), 0644)
+
+	nextPlan := PlanJSON{
+		Context: PlanContext{Domain: "next", Module: "next-mod"},
+		Layers:  []PlanLayerDef{{ID: "L0", Name: "Foundation", Items: []string{"next.1"}}},
+		Items: []PlanItem{
+			{ID: "next.1", Name: "Next Item", Description: "does thing", DependsOn: []string{}, Refs: []string{"notes/n.md"}, Tests: []PlanTest{{Category: "functional", Description: "works"}}},
+		},
+	}
+	data, _ := json.Marshal(nextPlan)
+	os.MkdirAll(filepath.Join(dir, "next"), 0755)
+	os.WriteFile(filepath.Join(dir, nextPlanFile), data, 0644)
+
+	s.Implementing.PlanQueue = []PlanQueueEntry{
+		{Name: "Next Plan", Domain: "next", File: nextPlanFile, Specs: []string{}, CodeSearchRoots: []string{"next/"}},
+	}
+	return s
+}
+
+// advanceImplementingToCommit advances to the COMMIT state (all items done, eval passed).
+func advanceImplementingToCommit(t *testing.T, s *ForgeState, dir string) {
+	t.Helper()
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	// Advance through all batch items.
+	for s.State == StateImplement {
+		Advance(s, AdvanceInput{}, dir)
+	}
+
+	// EVALUATE → COMMIT.
+	if s.State == StateEvaluate {
+		Advance(s, AdvanceInput{Verdict: "PASS"}, dir)
 	}
 }
 
@@ -1759,11 +2222,25 @@ func advanceToComplete(t *testing.T, s *ForgeState) {
 	Advance(s, AdvanceInput{}, "")                                                // RECONCILE_REVIEW → COMPLETE (empty queue)
 }
 
+// newSpecifyingStateWithConfig creates a specifying state with paths config so auto-generation can write files.
+func newSpecifyingStateWithConfig(numSpecs int, dir string) *ForgeState {
+	s := newSpecifyingState(numSpecs)
+	s.Config.Paths = PathsConfig{
+		StateDir:     ".forgectl/state",
+		WorkspaceDir: ".forge_workspace",
+	}
+	return s
+}
+
 func newPlanningState() *ForgeState {
 	return &ForgeState{
-		Phase:  PhasePlanning,
-		State:  StateOrient,
-		Config: makeTestConfig(2, 1, 3),
+		Phase: PhasePlanning,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Planning: PlanningConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Planning: &PlanningState{
 			CurrentPlan: &ActivePlan{
 				ID:              1,
@@ -1775,7 +2252,7 @@ func newPlanningState() *ForgeState {
 				CodeSearchRoots: []string{"test/"},
 			},
 			Queue:     []PlanQueueEntry{},
-			Completed: []interface{}{},
+			Completed: []CompletedPlan{},
 		},
 	}
 }
@@ -1834,7 +2311,7 @@ func createValidPlan(t *testing.T, dir, planFile string) {
 				Name:        "First Item",
 				Description: "Does the thing",
 				DependsOn:   []string{},
-				Ref:         "notes/config.md",
+				Refs:        []string{"notes/config.md"},
 				Tests: []PlanTest{
 					{Category: "functional", Description: "it works"},
 				},
@@ -1886,9 +2363,14 @@ func newImplementingState(dir string, numItems, batchSize int) *ForgeState {
 	os.WriteFile(planPath, data, 0644)
 
 	return &ForgeState{
-		Phase:  PhaseImplementing,
-		State:  StateOrient,
-		Config: makeTestConfig(batchSize, 1, 3),
+		Phase: PhaseImplementing,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Implementing: ImplementingConfig{
+				Batch: batchSize,
+				Eval:  EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Planning: &PlanningState{
 			CurrentPlan: &ActivePlan{
 				ID:     1,

@@ -243,28 +243,38 @@ Completed session state files are archived to a permanent directory within `stat
   "phase": "implementing",
   "state": "IMPLEMENT",
   "config": {
+    "domains": [
+      { "name": "optimizer", "path": "optimizer" },
+      { "name": "portal", "path": "portal" }
+    ],
     "specifying": {
       "batch": 3,
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
+      "commit_strategy": "all-specs",
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
-        "agent_type": "haiku",
-        "agent_count": 3,
+        "model": "haiku",
+        "type": "explore",
+        "count": 3,
         "user_review": false,
-        "eval": { "agent_type": "opus", "agent_count": 1 }
+        "eval": { "model": "opus", "type": "eval", "count": 1 }
       },
-      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "agent_type": "opus", "agent_count": 1, "user_review": false }
+      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "user_review": false }
     },
     "planning": {
       "batch": 1,
-      "study_code": { "agent_type": "haiku", "agent_count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
-      "refine": { "agent_type": "opus", "agent_count": 1 }
+      "commit_strategy": "strict",
+      "self_review": false,
+      "plan_all_before_implementing": false,
+      "study_code": { "model": "haiku", "type": "explore", "count": 3 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
+      "refine": { "model": "opus", "type": "refine", "count": 1 }
     },
     "implementing": {
       "batch": 2,
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
+      "commit_strategy": "scoped",
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false }
     },
     "paths": {
       "state_dir": ".forgectl/state",
@@ -362,25 +372,36 @@ Completed session state files are archived to a permanent directory within `stat
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `phase` | string | `specifying`, `planning`, or `implementing` |
+| `phase` | string | `specifying`, `generate_planning_queue`, `planning`, or `implementing` |
 | `state` | string | Current state within the active phase |
 | `started_at_phase` | string | Which phase the session was initialized at (for display) |
 | **Config** | | Mirrors `.forgectl/config` TOML structure. See `docs/configurations.md`. |
+| `config.domains` | array | Optional. Configured domains with `name` and `path`. Empty array if none configured. |
+| `config.domains[].name` | string | Domain name |
+| `config.domains[].path` | string | Domain directory path relative to project root |
 | `config.specifying.batch` | integer | Specs per specifying cycle (domain-grouped) |
+| `config.specifying.commit_strategy` | string | Git staging strategy for specifying commits: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `all-specs`) |
+| `config.specifying.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
 | `config.specifying.eval.*` | object | Eval round limits and agent config for specifying |
 | `config.specifying.cross_reference.*` | object | Cross-reference round limits, agent config, and user_review flag |
 | `config.specifying.cross_reference.eval.*` | object | Agent config for cross-reference evaluation |
 | `config.specifying.reconciliation.*` | object | Reconciliation round limits and agent config |
-| `config.planning.batch` | integer | Plans per planning cycle (TODO: >1 not yet supported) |
+| `config.planning.batch` | integer | Plans per planning cycle (>1 not yet supported, reserved for future use) |
+| `config.planning.commit_strategy` | string | Git staging strategy for planning commits: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `strict`) |
+| `config.planning.self_review` | boolean | Whether SELF_REVIEW state is entered between validation and EVALUATE (default: `false`) |
+| `config.planning.plan_all_before_implementing` | boolean | When `false` (default): interleaved plan-implement per domain. When `true`: all planning then all implementing. |
 | `config.planning.study_code.*` | object | Agent config for codebase exploration |
+| `config.planning.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
 | `config.planning.eval.*` | object | Eval round limits and agent config for planning |
 | `config.planning.refine.*` | object | Agent config for plan refinement |
 | `config.implementing.batch` | integer | Plan items per implementing batch |
+| `config.implementing.commit_strategy` | string | Git staging strategy for implementing commits: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `scoped`) |
+| `config.implementing.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
 | `config.implementing.eval.*` | object | Eval round limits and agent config for implementing |
 | `config.paths.state_dir` | string | State file directory |
 | `config.paths.workspace_dir` | string | Domain artifact directory name |
 | `config.general.user_guided` | boolean | Whether guided pauses are active |
-| `config.general.enable_commits` | boolean | Whether scaffold requires/executes git commits |
+| `config.general.enable_commits` | boolean | Whether scaffold auto-commits at commit points. See `docs/auto-committing.md`. |
 | `config.logs.enabled` | boolean | Whether activity logging is active |
 | `config.logs.retention_days` | integer | Log file age limit for pruning |
 | `config.logs.max_files` | integer | Maximum log file count for pruning |
@@ -390,12 +411,14 @@ Completed session state files are archived to a permanent directory within `stat
 | `specifying.queue` | array | Remaining specs (each with `domain_path`) |
 | `specifying.completed` | array | Finished specs with eval history and commit hashes |
 | `specifying.completed[].domain_path` | string | Filesystem path to the domain directory |
-| `specifying.completed[].commit_hashes` | string[] | Git commit hashes registered via add-commit/reconcile-commit |
+| `specifying.completed[].commit_hashes` | string[] | Git commit hashes registered via auto-commit at COMPLETE when `enable_commits: true` |
 | `specifying.completed[].evals` | array | Full eval trail per spec |
 | `specifying.cross_reference` | object | Per-domain cross-reference round and eval history |
 | `specifying.domains` | object | Per-domain metadata (code_search_roots from set-roots) |
 | `specifying.domains[<domain>].code_search_roots` | string[] | Code search roots set via set-roots command |
 | `specifying.reconcile` | object | Reconciliation round and eval history |
+| **Generate Planning Queue** | | |
+| `generate_planning_queue.plan_queue_file` | string | Path to the auto-generated plan queue file (`<state_dir>/plan-queue.json`) |
 | **Planning** | | |
 | `planning.current_plan` | object/null | The plan being worked on |
 | `planning.round` | integer | Current planning eval round |
@@ -403,6 +426,9 @@ Completed session state files are archived to a permanent directory within `stat
 | `planning.queue` | array | Remaining plans |
 | `planning.completed` | array | Finished plans |
 | **Implementing** | | |
+| `implementing.plan_queue` | array | Plans remaining to implement (populated when `plan_all_before_implementing: true`). Each entry has `domain`, `name`, `file`. |
+| `implementing.completed_plans` | array | Plans that have been implemented. |
+| `implementing.current_plan` | object | The plan currently being implemented (`domain`, `name`, `file`). |
 | `implementing.current_layer` | object | Active layer |
 | `implementing.batch_number` | integer | Global batch counter (1-indexed) |
 | `implementing.current_batch` | object | Active batch state |
@@ -412,7 +438,7 @@ Completed session state files are archived to a permanent directory within `stat
 | `implementing.current_batch.evals` | array | Batch eval history |
 | `implementing.layer_history` | array | Completed batches and layers |
 
-Phase sections that haven't been reached yet are `null` in the state file. When starting at a later phase (`--phase planning`), earlier phase sections remain `null`.
+Phase sections that haven't been reached yet are `null` in the state file. When starting at a later phase (`--phase planning`), earlier phase sections remain `null`. The `generate_planning_queue` section is `null` when skipped via `--from` at specifying PHASE_SHIFT or when starting at `--phase planning`.
 
 ---
 
@@ -479,7 +505,7 @@ Phase sections that haven't been reached yet are `null` in the state file. When 
 
 ## Implements
 - Atomic state file writes with backup and startup recovery
-- State file schema for all three phases with phase-scoped `config` object
+- State file schema for all four phases with phase-scoped `config` object
 - Project root discovery via `.forgectl/` directory walk
 - Configurable state directory (`paths.state_dir`)
 - Domain artifacts in configurable workspace directory (`paths.workspace_dir` = `.forge_workspace`)

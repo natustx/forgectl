@@ -11,12 +11,13 @@
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `session_id` | string | **yes** | UUID v4, generated at init, never changes for the session lifetime |
-| `phase` | string | **yes** | Current phase: `"specifying"`, `"planning"`, or `"implementing"` |
+| `phase` | string | **yes** | Current phase: `"specifying"`, `"generate_planning_queue"`, `"planning"`, or `"implementing"` |
 | `state` | string | **yes** | Current state within the phase (see State Values below) |
 | `started_at_phase` | string | **yes** | Phase selected at `forgectl init` time |
 | `config` | ConfigObject | **yes** | Configuration nested from .forgectl/config (TOML) |
 | `phase_shift` | PhaseShiftInfo | no | Present only during PHASE_SHIFT state |
 | `specifying` | SpecifyingState | no | Non-null when phase = `"specifying"` |
+| `generate_planning_queue` | GeneratePlanningQueueState | no | Non-null when phase = `"generate_planning_queue"` |
 | `planning` | PlanningState | no | Non-null when phase = `"planning"` or `"implementing"` |
 | `implementing` | ImplementingState | no | Non-null when phase = `"implementing"` |
 
@@ -27,8 +28,13 @@
 ### Specifying
 `ORIENT` → `SELECT` → `DRAFT` → `EVALUATE` ⇄ `REFINE` → `ACCEPT` → `DONE` → `RECONCILE` → `RECONCILE_EVAL` → `RECONCILE_REVIEW` → `COMPLETE` → `PHASE_SHIFT`
 
+### Generate Planning Queue
+`ORIENT` → `REFINE` → `PHASE_SHIFT`
+
 ### Planning
-`ORIENT` → `STUDY_SPECS` → `STUDY_CODE` → `STUDY_PACKAGES` → `REVIEW` → `DRAFT` → `VALIDATE` → `EVALUATE` ⇄ `REFINE` → `ACCEPT` → `PHASE_SHIFT`
+`ORIENT` → `STUDY_SPECS` → `STUDY_CODE` → `STUDY_PACKAGES` → `REVIEW` → `DRAFT` → `VALIDATE` → `SELF_REVIEW`* → `EVALUATE` ⇄ `REFINE` → `ACCEPT` → `DONE` → `PHASE_SHIFT`
+
+*SELF_REVIEW only entered when `planning.self_review: true`.
 
 ### Implementing
 `ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → `COMMIT` → `ORIENT` | `DONE`
@@ -39,11 +45,20 @@
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `specifying` | PhaseConfig | Specifying-phase config (batch, eval.min_rounds, eval.max_rounds, reconciliation.*) |
-| `planning` | PhaseConfig | Planning-phase config |
-| `implementing` | PhaseConfig | Implementing-phase config |
+| `domains` | DomainConfig[] | Optional. Configured domains. Empty array if none configured. |
+| `specifying` | SpecifyingPhaseConfig | Specifying-phase config |
+| `planning` | PlanningPhaseConfig | Planning-phase config |
+| `implementing` | ImplementingPhaseConfig | Implementing-phase config |
+| `paths` | PathsConfig | File path configuration |
 | `general` | GeneralConfig | Global config (enable_commits, user_guided) |
 | `logs` | LogsConfig | Logging configuration |
+
+### DomainConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Domain name |
+| `path` | string | Domain directory path relative to project root |
 
 ### LogsConfig
 
@@ -53,20 +68,68 @@
 | `retention_days` | int | Number of days to retain log files |
 | `max_files` | int | Maximum number of log files to keep |
 
-### PhaseConfig
+### SpecifyingPhaseConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `batch` | int | Batch size for this phase |
-| `eval` | EvalConfig | Evaluation settings |
-| `reconciliation` | ReconciliationConfig | Reconciliation settings (specifying only) |
+| `batch` | int | Specs per specifying cycle (domain-grouped) |
+| `commit_strategy` | string | Git staging strategy: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `all-specs`) |
+| `eval` | AgentEvalConfig | Evaluation settings |
+| `cross_reference` | CrossReferenceConfig | Cross-reference settings |
+| `reconciliation` | ReconciliationConfig | Reconciliation settings |
 
-### EvalConfig
+### PlanningPhaseConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `batch` | int | Plans per planning cycle (>1 not yet supported, reserved for future use) |
+| `commit_strategy` | string | Git staging strategy: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `strict`) |
+| `self_review` | bool | Whether SELF_REVIEW state is entered between validation and EVALUATE (default: `false`) |
+| `plan_all_before_implementing` | bool | When `false` (default): interleaved plan-implement per domain. When `true`: all planning then all implementing. |
+| `study_code` | AgentConfig | Agent config for codebase exploration |
+| `eval` | AgentEvalConfig | Evaluation settings |
+| `refine` | AgentConfig | Agent config for plan refinement |
+
+### ImplementingPhaseConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `batch` | int | Plan items per implementing batch |
+| `commit_strategy` | string | Git staging strategy: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `scoped`) |
+| `eval` | AgentEvalConfig | Evaluation settings |
+
+### AgentConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | string | Model name (e.g., `"opus"`, `"haiku"`) |
+| `type` | string | Agent role (e.g., `"eval"`, `"explore"`, `"refine"`) |
+| `count` | int | Number of agent instances to spawn |
+
+### AgentEvalConfig
+
+Extends AgentConfig with additional evaluation fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | string | Model name |
+| `type` | string | Agent role |
+| `count` | int | Number of agent instances to spawn |
 | `min_rounds` | int | Minimum evaluation rounds (>= 1) |
 | `max_rounds` | int | Maximum evaluation rounds (>= min_rounds) |
+| `enable_eval_output` | bool | Whether eval sub-agents write report files (default: `false`) |
+
+### CrossReferenceConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `min_rounds` | int | Min rounds for cross-reference evaluation |
+| `max_rounds` | int | Max rounds for cross-reference evaluation |
+| `model` | string | Model name |
+| `type` | string | Agent role |
+| `count` | int | Number of agent instances to spawn |
+| `user_review` | bool | Whether user review is required |
+| `eval` | AgentConfig | Agent config for cross-reference evaluation |
 
 ### ReconciliationConfig
 
@@ -74,6 +137,17 @@
 |-------|------|---------|-------------|
 | `min_rounds` | int | 0 | Min rounds for spec reconciliation |
 | `max_rounds` | int | 3 | Max rounds for spec reconciliation |
+| `model` | string | — | Model name |
+| `type` | string | — | Agent role |
+| `count` | int | — | Number of agent instances to spawn |
+| `user_review` | bool | false | Whether user review is required |
+
+### PathsConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state_dir` | string | State file directory (default: `.forgectl/state`) |
+| `workspace_dir` | string | Domain artifact directory name (default: `.forge_workspace`) |
 
 ### GeneralConfig
 
@@ -97,7 +171,7 @@
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `current_spec` | ActiveSpec | Spec being drafted/evaluated. Null between specs. |
+| `current_specs` | ActiveSpec[] | Spec batch being drafted/evaluated. Null between specs. |
 | `domains` | object | Per-domain metadata. Each key is a domain name. |
 | `queue` | SpecQueueEntry[] | Remaining specs to process. |
 | `completed` | CompletedSpec[] | Specs that have been accepted. |
@@ -134,7 +208,7 @@ Each key in `domains` is a domain name, value is:
 | `domain` | string | Domain |
 | `file` | string | Path to spec file |
 | `rounds_taken` | int | Total eval rounds before acceptance |
-| `commit_hashes` | string[] | Git commit hashes related to this spec (optional, array only) |
+| `commit_hashes` | string[] | Git commit hashes registered via auto-commit at COMPLETE when `enable_commits: true` (optional, array only) |
 | `evals` | EvalRecord[] | Evaluation history (optional) |
 
 ### ReconcileState
@@ -143,6 +217,14 @@ Each key in `domains` is a domain name, value is:
 |-------|------|-------------|
 | `round` | int | Reconciliation round counter (starts at 0) |
 | `evals` | EvalRecord[] | Reconciliation evaluation history |
+
+---
+
+## GeneratePlanningQueueState
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `plan_queue_file` | string | Path to the auto-generated plan queue file (`<state_dir>/plan-queue.json`) |
 
 ---
 
@@ -186,10 +268,21 @@ Each key in `domains` is a domain name, value is:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `plan_queue` | PlanRef[] | Plans remaining to implement. Populated when `plan_all_before_implementing: true`. Each entry has `domain`, `name`, `file`. |
+| `completed_plans` | PlanRef[] | Plans that have been fully implemented. |
+| `current_plan` | PlanRef | The plan currently being implemented (`domain`, `name`, `file`). |
 | `current_layer` | LayerRef | Current layer being worked on |
 | `batch_number` | int | Incremental batch counter across all layers |
 | `current_batch` | BatchState | Current batch of items |
 | `layer_history` | LayerHistory[] | Completed layers with batch histories |
+
+### PlanRef
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | string | Domain name |
+| `name` | string | Plan display name |
+| `file` | string | Path to plan.json |
 
 ### LayerRef
 
@@ -240,11 +333,12 @@ Each key in `domains` is a domain name, value is:
 1. Only one phase state object is active based on `phase` value.
 2. `planning` remains non-null during implementing (holds `current_plan.file` reference).
 3. `config` mirrors `.forgectl/config` (TOML) structure at state init time; persisted in state for audit trail.
-4. `commit_hash` (singular) removed; only `commit_hashes` (array) used.
+4. `commit_hashes` (array) on completed specs contain hashes registered via auto-commit at COMPLETE when `enable_commits: true`.
 5. `.workspace` renamed to `.forge_workspace` throughout.
 6. Empty arrays and null objects are omitted from JSON (`omitempty`).
 7. File is serialized with 2-space indentation.
 8. Atomic write: tmpfile → backup (`.bak`) → rename. Recovery reads `.bak` if primary is corrupt.
+9. Phase sections that haven't been reached yet are `null` in the state file. The `generate_planning_queue` section is `null` when skipped via `--from` at specifying PHASE_SHIFT or when starting at `--phase planning`.
 
 ---
 
@@ -253,5 +347,5 @@ Each key in `domains` is a domain name, value is:
 - Type definitions: `forgectl/state/types.go`
 - Persistence: `forgectl/state/state.go`
 - Transitions: `forgectl/state/advance.go`
-- Config loading: TODO (not yet implemented)
+- Config loading: `forgectl/state/config.go`
 - Location: `.forgectl/state/forgectl-state.json`

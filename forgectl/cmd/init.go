@@ -7,7 +7,6 @@ import (
 
 	"forgectl/state"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +30,11 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	// Reject generate_planning_queue as an explicit --phase value.
+	if initPhase == string(state.PhaseGeneratePlanningQueue) {
+		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
+	}
+
 	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true}
 	if !validPhases[initPhase] {
 		return fmt.Errorf("--phase must be specifying, planning, or implementing")
@@ -62,9 +66,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading file: %w", err)
 	}
 
+	sessionID := state.GenerateSessionID()
 	phase := state.PhaseName(initPhase)
 	out := cmd.OutOrStdout()
-	sessionID := uuid.New().String()
 
 	s := &state.ForgeState{
 		Phase:          phase,
@@ -87,6 +91,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(data, &input); err != nil {
 			return fmt.Errorf("parsing input: %w", err)
 		}
+
+		// Validate domain config against spec queue when domains are configured.
+		if len(cfg.Domains) > 0 {
+			domainPaths := map[string]string{}
+			for _, d := range cfg.Domains {
+				domainPaths[d.Name] = d.Path
+			}
+			for i, spec := range input.Specs {
+				if _, ok := domainPaths[spec.Domain]; !ok {
+					return fmt.Errorf("specs[%d]: domain %q not found in config domains", i, spec.Domain)
+				}
+				expectedPrefix := domainPaths[spec.Domain] + "/specs/"
+				if len(spec.File) < len(expectedPrefix) || spec.File[:len(expectedPrefix)] != expectedPrefix {
+					return fmt.Errorf("specs[%d]: file %q must start with %s", i, spec.File, expectedPrefix)
+				}
+			}
+		}
+
 		s.Specifying = state.NewSpecifyingState(input.Specs)
 
 	case state.PhasePlanning:
@@ -181,7 +203,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 }
 
 // phaseRoundConfig returns batch size and min/max rounds for the given phase.
-func phaseRoundConfig(cfg state.Config, phase state.PhaseName) (batchSize, minRounds, maxRounds int) {
+func phaseRoundConfig(cfg state.ForgeConfig, phase state.PhaseName) (batchSize, minRounds, maxRounds int) {
 	switch phase {
 	case state.PhaseSpecifying:
 		return cfg.Specifying.Batch, cfg.Specifying.Eval.MinRounds, cfg.Specifying.Eval.MaxRounds

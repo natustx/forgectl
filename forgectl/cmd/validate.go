@@ -185,18 +185,16 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	case "plan":
 		baseDir := filepath.Dir(filePath)
 		errs = state.ValidatePlanJSON(data, baseDir)
-		if len(errs) == 0 {
-			var plan state.PlanJSON
-			json.Unmarshal(data, &plan)
-			entryCount = len(plan.Items)
-		}
-		entryLabel = "items"
 	}
 
 	filename := filepath.Base(filePath)
 
 	if len(errs) == 0 {
-		fmt.Fprintf(out, "Validated: %s — %d %s, no errors.\n", filename, entryCount, entryLabel)
+		if fileType == "plan" {
+			fmt.Fprintf(out, "Validated: %s — no errors.\n", filename)
+		} else {
+			fmt.Fprintf(out, "Validated: %s — %d %s, no errors.\n", filename, entryCount, entryLabel)
+		}
 		return nil
 	}
 

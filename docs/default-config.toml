@@ -2,6 +2,20 @@
 # Place this file at .forgectl/config in your project root.
 # All values shown are defaults.
 
+# --- Domains (optional) ---
+# Declare known domains with names and paths.
+# Domains are optional. When configured, spec queue entries at init
+# must reference a configured domain name.
+# No domain path may be a prefix of another domain path.
+#
+# [[domains]]
+# name = "optimizer"
+# path = "optimizer"
+#
+# [[domains]]
+# name = "portal"
+# path = "portal"
+
 # --- Specifying Phase ---
 # Controls spec generation from planning documents.
 
@@ -10,35 +24,46 @@
 # never mixes domains. If a domain has more specs than batch, it
 # produces multiple batches before moving to the next domain.
 batch = 3
+# Commit staging strategy for specifying commits.
+# "all-specs" stages all files found in domain specs/ directories.
+commit_strategy = "all-specs"
 
 [specifying.eval]
 # Minimum eval rounds before PASS can accept a spec batch.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for spec batch evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for spec batch evaluation.
+model = "opus"
 # Number of sub-agents to spawn for evaluation.
-agent_count = 1
+count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 [specifying.cross_reference]
 # Minimum eval rounds for domain cross-reference.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 2
-# Sub-agent type for cross-referencing domain specs.
-agent_type = "haiku"
+# Sub-agent role for this spawn point.
+type = "explore"
+# Model name for cross-referencing domain specs.
+model = "haiku"
 # Number of sub-agents to spawn for cross-referencing.
-agent_count = 3
+count = 3
 # When true, pause for user review after first CROSS_REFERENCE_EVAL.
 # Overrides user_guided — fires even when user_guided is false.
 user_review = false
 
 [specifying.cross_reference.eval]
-# Sub-agent type for evaluating cross-reference work.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for evaluating cross-reference work.
+model = "opus"
 # Number of sub-agents to spawn for cross-reference evaluation.
-agent_count = 1
+count = 1
 
 [specifying.reconciliation]
 # Minimum rounds before PASS can complete reconciliation.
@@ -46,10 +71,12 @@ agent_count = 1
 min_rounds = 0
 # Maximum reconciliation rounds. FAIL at this threshold forces completion.
 max_rounds = 3
-# Sub-agent type for reconciliation evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for reconciliation evaluation.
+model = "opus"
 # Number of sub-agents to spawn for reconciliation evaluation.
-agent_count = 1
+count = 1
 # When true, RECONCILE_REVIEW action includes "STOP please review and discuss
 # with user before continuing." When false, it says "Reconciliation review complete."
 # The state is entered either way — this only controls the output message.
@@ -60,30 +87,49 @@ user_review = false
 
 [planning]
 # Number of plans processed per cycle.
-# TODO: values > 1 are not yet supported. Reserved for future use.
+# Values > 1 are not yet supported. Reserved for future use.
 batch = 1
+# Commit staging strategy for planning commits.
+# "strict" only stages files explicitly registered in state/plan.json.
+commit_strategy = "strict"
+# When true, SELF_REVIEW state is entered between validation and
+# EVALUATE. The agent reviews their plan against specs and study
+# notes before evaluation.
+self_review = false
+# When false (default, interleaved): each domain is planned then
+# immediately implemented before the next domain begins.
+# When true: all domains are planned first, then all implemented.
+plan_all_before_implementing = false
 
 [planning.study_code]
-# Sub-agent type for codebase exploration.
-agent_type = "haiku"
+# Sub-agent role for this spawn point.
+type = "explore"
+# Model name for codebase exploration.
+model = "haiku"
 # Number of sub-agents to spawn for codebase exploration.
-agent_count = 3
+count = 3
 
 [planning.eval]
 # Minimum eval rounds before PASS can accept a plan.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for plan evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for plan evaluation.
+model = "opus"
 # Number of sub-agents to spawn for plan evaluation.
-agent_count = 1
+count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 [planning.refine]
-# Sub-agent type for updating plan from eval findings.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "refine"
+# Model name for updating plan from eval findings.
+model = "opus"
 # Number of sub-agents to spawn for plan refinement.
-agent_count = 1
+count = 1
 
 # --- Implementing Phase ---
 # Controls batched implementation of plan items.
@@ -92,16 +138,23 @@ agent_count = 1
 # Maximum unblocked plan items per implementation batch.
 # Items are selected in dependency order from the current layer.
 batch = 2
+# Commit staging strategy for implementing commits.
+# "scoped" stages files registered in state plus any changes within the domain path.
+commit_strategy = "scoped"
 
 [implementing.eval]
 # Minimum eval rounds before PASS can accept an implementation batch.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for implementation evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for implementation evaluation.
+model = "opus"
 # Number of sub-agents to spawn for implementation evaluation.
-agent_count = 1
+count = 1
+# When true, eval sub-agents write report files to disk.
+enable_eval_output = false
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.
@@ -126,10 +179,9 @@ workspace_dir = ".forge_workspace"
 user_guided = true
 
 # Controls whether the scaffold requires and executes git commits.
-# false: COMMIT states are pause points but --message is not required.
-#        No git operations. Engineer commits manually.
-# true:  --message is required and validated at COMMIT states.
-#        TODO: automatic git commit execution is not yet implemented.
+# false: No git operations. --message is not required. Engineer commits manually.
+# true:  --message is required at commit points. Scaffold stages and commits automatically.
+#        See docs/auto-committing.md for commit points, staging strategies, and behavior.
 enable_commits = false
 
 # --- Logs ---

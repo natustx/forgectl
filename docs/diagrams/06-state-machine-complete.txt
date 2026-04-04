@@ -1,12 +1,12 @@
 ================================================================================
-              FORGECTL — Complete State Machine (All 19 States)
+              FORGECTL — Complete State Machine (All 22 States)
 ================================================================================
 
-  3 Phases x Multiple States = 19 Total States
-  State file: forge.json (JSON-backed, atomic writes)
+  4 Phases x Multiple States = 22 Total States
+  State file: .forgectl/state/forgectl-state.json (JSON-backed, atomic writes)
 
 
-  SPECIFYING PHASE (14 transitions)
+  SPECIFYING PHASE
   ═══════════════════════════════════════════════════════════════════════════
 
   ORIENT ──────► SELECT ──────► DRAFT ──────► EVALUATE
@@ -46,13 +46,28 @@
                                              │             │
                                              ▼             └──► RECONCILE
                                           COMPLETE
+                                        (--message req'd if enable_commits)
                                              │
                                              ▼
                                         PHASE_SHIFT
-                                    (needs --from flag)
+                                    (specifying → generate_planning_queue)
 
 
-  PLANNING PHASE (13 transitions)
+  GENERATE PLANNING QUEUE PHASE
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ORIENT ──────► REFINE ──────► PHASE_SHIFT
+  (generates                    (generate_planning_queue → planning)
+   plan-queue.json)
+
+  Notes:
+  - ORIENT: auto-generates <state_dir>/plan-queue.json from completed specs
+  - REFINE: architect reviews, reorders, edits the file; validates on advance
+  - PHASE_SHIFT: consumes plan queue, transitions to planning ORIENT
+  - Can be skipped entirely: forgectl advance --from <file> at specifying PHASE_SHIFT
+
+
+  PLANNING PHASE
   ═══════════════════════════════════════════════════════════════════════════
 
   ORIENT ──► STUDY_SPECS ──► STUDY_CODE ──► STUDY_PACKAGES ──► REVIEW
@@ -64,27 +79,39 @@
                                                     plan valid        plan invalid
                                                          │                 │
                                                          ▼                 ▼
-                                                     EVALUATE          VALIDATE
-                                                         │                 │
-                                                  ┌──────┴──────┐    fix + advance
-                                                  │             │         │
-                                            PASS>=min      FAIL<max      │
-                                            or FAIL>=max   or PASS<min   │
-                                                  │             │         │
-                                                  ▼             ▼         │
-                                               ACCEPT        REFINE ◄────┘
+                                                   SELF_REVIEW*        VALIDATE
+                                                   (optional)              │
+                                                         │            fix + advance
+                                                         ▼                 │
+                                                     EVALUATE ◄────────────┘
+                                                         │
+                                                  ┌──────┴──────┐
                                                   │             │
-                                                  │             └──► EVALUATE
-                                                  │                  or VALIDATE
-                                                  ▼
-                                             PHASE_SHIFT
-                                         (auto, no --from)
+                                            PASS>=min      FAIL<max
+                                            or FAIL>=max   or PASS<min
+                                                  │             │
+                                                  ▼             ▼
+                                               ACCEPT        REFINE ──► EVALUATE
+                                                  │                      or VALIDATE
                                                   │
-                                          Mutates plan.json:
-                                          adds passes + rounds
+                          ┌───────────────────────┴──────────────────────────┐
+                          │                                                   │
+              plan_all: false                                    plan_all: true
+                          │                                                   │
+                          ▼                                     ┌─────────────┴──────────┐
+                    PHASE_SHIFT                        queue non-empty           queue empty
+                  (planning →                                   │                        │
+                   implementing)                        PHASE_SHIFT                    DONE
+                                                     (planning → planning,               │
+                                                      domain boundary)                   ▼
+                                                               │                   PHASE_SHIFT
+                                                     ──► planning ORIENT          (planning →
+                                                         (next domain)              implementing)
+
+  * SELF_REVIEW only entered when planning.self_review: true
 
 
-  IMPLEMENTING PHASE (8 transitions)
+  IMPLEMENTING PHASE
   ═══════════════════════════════════════════════════════════════════════════
 
   ORIENT ──────► IMPLEMENT ──────► IMPLEMENT ──────► EVALUATE
@@ -104,6 +131,19 @@
     │                                     │             │
     └─────────────────────────────────────┘             ▼
                                                       DONE
+                                                        │
+                              ┌─────────────────────────┴─────────────────────────┐
+                              │                                                     │
+                  plan_all: false                                       plan_all: true
+                  planning queue non-empty                              impl queue non-empty
+                              │                                                     │
+                              ▼                                                     ▼
+                        PHASE_SHIFT                                           PHASE_SHIFT
+                    (implementing →                                       (implementing →
+                      planning)                                            implementing,
+                          │                                                domain boundary)
+                  ──► planning ORIENT                                  ──► implementing ORIENT
+                      (next domain)                                        (next domain)
 
 
 
@@ -113,43 +153,47 @@
 
   State Categories:
 
-  ┌────────────────────┬──────────────────────────────────────────────────┐
-  │ Category           │ States                                          │
-  ├────────────────────┼──────────────────────────────────────────────────┤
-  │ Orientation        │ ORIENT                                          │
-  │ Selection          │ SELECT                                          │
-  │ Research           │ STUDY_SPECS, STUDY_CODE, STUDY_PACKAGES, REVIEW │
-  │ Creation           │ DRAFT                                           │
-  │ Validation         │ VALIDATE                                        │
-  │ Evaluation         │ EVALUATE, RECONCILE_EVAL                        │
-  │ Iteration          │ REFINE, RECONCILE, RECONCILE_REVIEW             │
-  │ Execution          │ IMPLEMENT                                       │
-  │ Acceptance         │ ACCEPT, COMMIT                                  │
-  │ Terminal           │ DONE, COMPLETE                                  │
-  │ Transition         │ PHASE_SHIFT                                     │
-  └────────────────────┴──────────────────────────────────────────────────┘
+  ┌────────────────────┬──────────────────────────────────────────────────────┐
+  │ Category           │ States                                               │
+  ├────────────────────┼──────────────────────────────────────────────────────┤
+  │ Orientation        │ ORIENT                                               │
+  │ Selection          │ SELECT                                               │
+  │ Research           │ STUDY_SPECS, STUDY_CODE, STUDY_PACKAGES, REVIEW      │
+  │ Creation           │ DRAFT                                                │
+  │ Self-review        │ SELF_REVIEW                                          │
+  │ Validation         │ VALIDATE                                             │
+  │ Evaluation         │ EVALUATE, RECONCILE_EVAL                             │
+  │ Iteration          │ REFINE, RECONCILE, RECONCILE_REVIEW                  │
+  │ Execution          │ IMPLEMENT                                            │
+  │ Acceptance         │ ACCEPT, COMMIT                                       │
+  │ Terminal           │ DONE, COMPLETE                                       │
+  │ Transition         │ PHASE_SHIFT                                          │
+  └────────────────────┴──────────────────────────────────────────────────────┘
 
   Phase availability:
 
-  ┌──────────────┬──────────────────────────────────────────────────────┐
-  │ State         │ Specifying    Planning    Implementing              │
-  ├──────────────┼──────────────────────────────────────────────────────┤
-  │ ORIENT        │     x            x            x                     │
-  │ SELECT        │     x                                               │
-  │ DRAFT         │     x            x                                  │
-  │ EVALUATE      │     x            x            x                     │
-  │ REFINE        │     x            x                                  │
-  │ ACCEPT        │     x            x                                  │
-  │ DONE          │     x                         x                     │
-  │ RECONCILE     │     x                                               │
-  │ RECONCILE_*   │     x                                               │
-  │ COMPLETE      │     x                                               │
-  │ PHASE_SHIFT   │     x            x                                  │
-  │ STUDY_SPECS   │                  x                                  │
-  │ STUDY_CODE    │                  x                                  │
-  │ STUDY_PKGS    │                  x                                  │
-  │ REVIEW        │                  x                                  │
-  │ VALIDATE      │                  x                                  │
-  │ IMPLEMENT     │                               x                     │
-  │ COMMIT        │                               x                     │
-  └──────────────┴──────────────────────────────────────────────────────┘
+  ┌──────────────────┬──────────────────────────────────────────────────────────┐
+  │ State             │ Specifying  Gen-Plan-Q  Planning  Implementing          │
+  ├──────────────────┼──────────────────────────────────────────────────────────┤
+  │ ORIENT            │     x           x          x           x                │
+  │ SELECT            │     x                                                   │
+  │ DRAFT             │     x                      x                            │
+  │ SELF_REVIEW       │                             x                           │
+  │ EVALUATE          │     x                      x           x                │
+  │ REFINE            │     x                      x                            │
+  │ ACCEPT            │     x                      x                            │
+  │ DONE              │     x                      x*          x                │
+  │ RECONCILE         │     x                                                   │
+  │ RECONCILE_*       │     x                                                   │
+  │ COMPLETE          │     x                                                   │
+  │ PHASE_SHIFT       │     x           x           x           x               │
+  │ STUDY_SPECS       │                             x                           │
+  │ STUDY_CODE        │                             x                           │
+  │ STUDY_PKGS        │                             x                           │
+  │ REVIEW            │                             x                           │
+  │ VALIDATE          │                             x                           │
+  │ IMPLEMENT         │                                         x               │
+  │ COMMIT            │                                         x               │
+  └──────────────────┴──────────────────────────────────────────────────────────┘
+
+  * Planning DONE only reachable when plan_all_before_implementing: true

@@ -3,7 +3,7 @@
 ================================================================================
 
   A spec-driven development harness that compiles planning documents into
-  production code through three sequential phases, each governed by a state
+  production code through four sequential phases, each governed by a state
   machine with iterative AI-powered evaluation loops.
 
                          ┌──────────────────────┐
@@ -42,16 +42,43 @@
   └─────────────────────────────────────────────────────┼───────────────────┘
                                                         │
                      ┌──────────────────────────────────┘
-                     │  PHASE_SHIFT  (context refresh)
-                     │  forgectl advance --from plan-queue.json
+                     │  PHASE_SHIFT → generate_planning_queue
+                     │  (or forgectl advance --from plan-queue.json
+                     │   to skip generation and go directly to planning)
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │   PHASE 2: PLANNING                                                     │
+  │   PHASE 2: GENERATE PLANNING QUEUE                                      │
+  │                                                                         │
+  │   Auto-generates plan-queue.json from completed specs.                  │
+  │   Architect reviews, reorders, and edits before planning begins.        │
+  │                                                                         │
+  │   ┌───────┐  ┌────────┐  ┌────────────┐                                │
+  │   │ORIENT ├─►│ REFINE ├─►│ PHASE_SHIFT│                                │
+  │   │(gen)  │  │(review)│  │            │                                │
+  │   └───────┘  └────────┘  └─────┬──────┘                                │
+  │                                 │                                       │
+  └─────────────────────────────────┼───────────────────────────────────────┘
+                                    │
+                     ┌──────────────┘
+                     │  PHASE_SHIFT → planning
+                     │  (or forgectl advance --from <path> to override file)
+                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                                                                         │
+  │   PHASE 3: PLANNING                                                     │
   │   Role: Staff Engineer                                                  │
   │                                                                         │
   │   Input:  plan-queue.json + specs/*.md                                  │
   │   Output: plan.json + notes/*.md                                        │
+  │                                                                         │
+  │   plan_all_before_implementing: false (default, interleaved)            │
+  │     Each domain: planning → PHASE_SHIFT → implementing                  │
+  │     Implementing DONE → PHASE_SHIFT → planning (next domain)            │
+  │                                                                         │
+  │   plan_all_before_implementing: true (all planning first)               │
+  │     All domains planned with PHASE_SHIFT between each domain            │
+  │     DONE → PHASE_SHIFT → implementing (all domains)                     │
   │                                                                         │
   │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────────┐           │
   │   │ORIENT ├─►│STUDY_SPECS├─►│STUDY_CODE ├─►│STUDY_PACKAGES│           │
@@ -61,20 +88,24 @@
   │                   │ REVIEW │◄─┘       │◄────────────┘                   │
   │                   └───┬────┘          │                                 │
   │                       ▼               │                                 │
-  │                   ┌───────┐    ┌──────────┐                             │
-  │                   │ DRAFT ├───►│ VALIDATE │ (if plan invalid)           │
-  │                   └───┬───┘    └────┬─────┘                             │
-  │                       │             │                                   │
-  │                       ▼             │                                   │
-  │                  ┌──────────┐◄──────┘                                   │
+  │               ┌─────────────┐  ┌──────────┐                            │
+  │               │    DRAFT    ├─►│ VALIDATE │ (if plan invalid)           │
+  │               └──────┬──────┘  └────┬─────┘                            │
+  │                      │              │                                   │
+  │                      ▼              │                                   │
+  │               ┌─────────────┐◄──────┘                                   │
+  │               │ SELF_REVIEW │ (only if planning.self_review: true)      │
+  │               └──────┬──────┘                                           │
+  │                      ▼                                                  │
+  │                  ┌──────────┐                                           │
   │                  │ EVALUATE │                                           │
   │                  └────┬─────┘                                           │
   │                       │                                                 │
   │              FAIL     │     PASS                                        │
   │            ┌──────────┼──────────┐                                      │
   │            ▼                     ▼                                       │
-  │       ┌────────┐           ┌────────┐                                   │
-  │       │ REFINE ├──┘        │ ACCEPT │                                   │
+  │       ┌────────┐           ┌────────┐  ──► DONE (plan_all: true,        │
+  │       │ REFINE ├──┘        │ ACCEPT │        queue empty)               │
   │       └────────┘           └───┬────┘                                   │
   │                                │                                        │
   └────────────────────────────────┼────────────────────────────────────────┘
@@ -82,10 +113,15 @@
                      ┌─────────────┘
                      │  PHASE_SHIFT  (context refresh)
                      │  Mutates plan.json: adds passes + rounds fields
+                     │
+                     │  Domain boundaries also fire PHASE_SHIFT:
+                     │    planning → planning (plan_all: true)
+                     │    implementing → planning (plan_all: false)
+                     │    implementing → implementing (plan_all: true)
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │   PHASE 3: IMPLEMENTING                                                 │
+  │   PHASE 4: IMPLEMENTING                                                 │
   │   Role: Senior Software Engineer                                        │
   │                                                                         │
   │   Input:  plan.json (with passes/rounds)                                │
@@ -106,8 +142,8 @@
   │                                         │                              │
   │                                         ▼                              │
   │                                    ┌────────┐                          │
-  │                                    │  DONE  │                          │
-  │                                    └────────┘                          │
+  │                                    │  DONE  │──► PHASE_SHIFT           │
+  │                                    └────────┘    (if plans remain)     │
   │                                                                         │
   └─────────────────────────────────────────────────────────────────────────┘
 
@@ -120,15 +156,22 @@
   │    Sequential flow
   ◄──  Loop back / retry
 
-  PHASE_SHIFT    Hard stop between phases; engineer refreshes context
-  EVALUATE       AI sub-agent reviews work against 11 evaluation dimensions
+  PHASE_SHIFT    Hard stop between phases and at domain boundaries;
+                 engineer refreshes context before proceeding
+  EVALUATE       AI sub-agent reviews work against evaluation dimensions
   REFINE         Fix deficiencies found in evaluation
-  COMMIT         Hard stop; engineer must git commit before continuing
+  COMMIT         Hard stop; must commit (or advance) before continuing
   GUIDED         Optional pause for human discussion (--guided flag)
 
   Round Enforcement (from .forgectl/config [phase].eval):
     eval.min_rounds   PASS below minimum forces another REFINE cycle
     eval.max_rounds   FAIL at maximum forces acceptance (prevents infinite loops)
+
+  Mode Control (general config):
+    plan_all_before_implementing: false (default)
+      Interleaved: plan domain → implement domain → plan domain → ...
+    plan_all_before_implementing: true
+      All planning first, then all implementing (PHASE_SHIFT at each domain boundary)
 
   Config & State:
     .forgectl/config                  TOML config file (phase-scoped)

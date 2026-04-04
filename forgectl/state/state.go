@@ -161,7 +161,7 @@ func ArchiveSession(stateDir string, domain string, s *ForgeState) error {
 // StateDir returns the absolute path to the state directory.
 // If cfg.Paths.StateDir is absolute, it is returned as-is.
 // Otherwise, it is joined with projectRoot.
-func StateDir(projectRoot string, cfg Config) string {
+func StateDir(projectRoot string, cfg ForgeConfig) string {
 	if filepath.IsAbs(cfg.Paths.StateDir) {
 		return cfg.Paths.StateDir
 	}
@@ -189,7 +189,7 @@ func NewPlanningState(plans []PlanQueueEntry) *PlanningState {
 	copy(queue, plans)
 	return &PlanningState{
 		Queue:     queue,
-		Completed: []interface{}{},
+		Completed: []CompletedPlan{},
 	}
 }
 

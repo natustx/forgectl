@@ -44,27 +44,28 @@ forgectl status
 # Advance to next state (no flags needed for most transitions)
 forgectl advance
 forgectl advance --file <domain>/specs/<spec-name>.md            # DRAFT only (override path)
-forgectl advance --verdict PASS --eval-report <path> --message "Add repo loading spec"  # EVALUATE: accept
-forgectl advance --verdict FAIL --eval-report <path>            # EVALUATE: fail → REFINE
+forgectl advance --verdict PASS --eval-report <path>             # EVALUATE: accept
+forgectl advance --verdict FAIL --eval-report <path>             # EVALUATE: fail → REFINE
+forgectl advance --message "Complete specifying phase"           # COMPLETE: auto-commit (when enable_commits: true)
 
-# Add a commit to a completed spec by ID
-forgectl add-commit --id 5 --hash "7cede10"
+# Add a spec to the queue during drafting or review
+forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
 
-# Auto-register a commit to all specs it touched (reconciliation, shared fixes)
-forgectl reconcile-commit --hash "8743b1d"
+# Set code search roots for a domain (used in planning phase)
+forgectl set-roots <path> [<path>...]
 ```
 
 ### CLI Flag Reference
 
 **Global:** `--dir <path>` — directory containing state file (default `.`)
 
-**`init`:** `--from` (required), `--batch-size` (required), `--max-rounds` (required), `--min-rounds` (default 1), `--guided` (default) / `--no-guided`, `--phase` (default `specifying`)
+**`init`:** `--from` (required), `--phase` (default `specifying`)
 
-**`advance`:** `--verdict PASS|FAIL`, `--eval-report <path>` (absolute path to eval file), `--file <path>`, `--message <string>`, `--from <path>`, `--guided` / `--no-guided`
+**`advance`:** `--verdict PASS|FAIL`, `--eval-report <path>`, `--file <path>`, `--message <string>` / `-m`, `--from <path>`, `--guided` / `--no-guided`
 
-**`add-commit`:** `--id` (required), `--hash` (required)
+**`add-queue-item`:** `--name` (required), `--domain` (required at DONE), `--topic` (required), `--file` (required), `--source` (optional, repeatable)
 
-**`reconcile-commit`:** `--hash` (required)
+**`set-roots`:** `--domain` (required at DONE), positional paths (required)
 
 ### State Flow
 

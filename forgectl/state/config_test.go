@@ -3,100 +3,267 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestDefaultConfigValues(t *testing.T) {
-	cfg := DefaultConfig()
+// TestFindProjectRoot verifies root discovery by walking up the directory tree.
+func TestFindProjectRoot(t *testing.T) {
+	// Create a temp tree: root/.forgectl/  root/sub/deep/
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	deep := filepath.Join(dir, "sub", "deep")
+	if err := os.MkdirAll(deep, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-	if cfg.Specifying.Batch != 3 {
-		t.Errorf("specifying.batch = %d, want 3", cfg.Specifying.Batch)
+	// Starting from a sub-directory should find the root.
+	got, err := FindProjectRoot(deep)
+	if err != nil {
+		t.Fatalf("FindProjectRoot from subdir: %v", err)
 	}
-	if cfg.Specifying.Eval.MinRounds != 1 {
-		t.Errorf("specifying.eval.min_rounds = %d, want 1", cfg.Specifying.Eval.MinRounds)
+	if got != dir {
+		t.Errorf("got %q, want %q", got, dir)
 	}
-	if cfg.Specifying.Eval.MaxRounds != 3 {
-		t.Errorf("specifying.eval.max_rounds = %d, want 3", cfg.Specifying.Eval.MaxRounds)
+
+	// Starting from the root itself should also work.
+	got, err = FindProjectRoot(dir)
+	if err != nil {
+		t.Fatalf("FindProjectRoot from root: %v", err)
 	}
-	if cfg.Planning.Batch != 1 {
-		t.Errorf("planning.batch = %d, want 1", cfg.Planning.Batch)
-	}
-	if cfg.Implementing.Batch != 2 {
-		t.Errorf("implementing.batch = %d, want 2", cfg.Implementing.Batch)
-	}
-	if cfg.Paths.StateDir != ".forgectl/state" {
-		t.Errorf("paths.state_dir = %q, want .forgectl/state", cfg.Paths.StateDir)
-	}
-	if !cfg.General.UserGuided {
-		t.Error("general.user_guided should default to true")
-	}
-	if cfg.General.EnableCommits {
-		t.Error("general.enable_commits should default to false")
-	}
-	if !cfg.Logs.Enabled {
-		t.Error("logs.enabled should default to true")
-	}
-	if cfg.Logs.RetentionDays != 90 {
-		t.Errorf("logs.retention_days = %d, want 90", cfg.Logs.RetentionDays)
-	}
-	if cfg.Logs.MaxFiles != 50 {
-		t.Errorf("logs.max_files = %d, want 50", cfg.Logs.MaxFiles)
+	if got != dir {
+		t.Errorf("got %q, want %q", got, dir)
 	}
 }
 
-func TestLoadConfigPartialOverride(t *testing.T) {
+// TestFindProjectRootNotFound verifies an error when .forgectl is absent.
+func TestFindProjectRootNotFound(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".forgectl"), 0755)
+	_, err := FindProjectRoot(dir)
+	if err == nil {
+		t.Fatal("expected error when .forgectl not found, got nil")
+	}
+	if err.Error() != "No .forgectl directory found." {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
-	// Only override implementing.batch — all other values should remain default.
-	toml := `[implementing]
-batch = 7
+// TestLoadConfigMissing verifies an error is returned when config file is missing.
+func TestLoadConfigMissing(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(dir)
+	if err == nil {
+		t.Fatal("expected error when .forgectl/config is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+// TestLoadConfigEmptyFile verifies defaults are returned when config file is empty.
+func TestLoadConfigEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig with empty config: %v", err)
+	}
+
+	def := DefaultForgeConfig()
+	if cfg.Specifying.Batch != def.Specifying.Batch {
+		t.Errorf("specifying.batch: got %d, want %d", cfg.Specifying.Batch, def.Specifying.Batch)
+	}
+	if cfg.Paths.StateDir != def.Paths.StateDir {
+		t.Errorf("paths.state_dir: got %q, want %q", cfg.Paths.StateDir, def.Paths.StateDir)
+	}
+}
+
+// TestLoadConfigToml verifies TOML values override defaults.
+func TestLoadConfigToml(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tomlContent := `
+[general]
+enable_commits = true
+user_guided    = true
+
+[specifying]
+batch           = 5
+commit_strategy = "scoped"
+
+[specifying.eval]
+min_rounds        = 2
+max_rounds        = 4
+model             = "haiku"
+type              = "eval"
+count             = 2
+enable_eval_output = true
+
+[implementing]
+batch = 3
+
+[paths]
+state_dir     = ".custom/state"
+workspace_dir = ".custom_workspace"
+
+[logs]
+enabled        = false
+retention_days = 30
+max_files      = 10
 `
-	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(toml), 0644)
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := LoadConfig(dir)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if cfg.Implementing.Batch != 7 {
-		t.Errorf("implementing.batch = %d, want 7 (overridden)", cfg.Implementing.Batch)
+	if !cfg.General.EnableCommits {
+		t.Error("general.enable_commits: want true")
 	}
-	// Un-overridden fields should retain their defaults.
-	if cfg.Specifying.Batch != 3 {
-		t.Errorf("specifying.batch = %d, want 3 (default)", cfg.Specifying.Batch)
+	if cfg.Specifying.Batch != 5 {
+		t.Errorf("specifying.batch: got %d, want 5", cfg.Specifying.Batch)
 	}
-	if cfg.Implementing.Eval.MaxRounds != 3 {
-		t.Errorf("implementing.eval.max_rounds = %d, want 3 (default)", cfg.Implementing.Eval.MaxRounds)
+	if cfg.Specifying.CommitStrategy != "scoped" {
+		t.Errorf("specifying.commit_strategy: got %q, want %q", cfg.Specifying.CommitStrategy, "scoped")
 	}
-	if !cfg.General.UserGuided {
-		t.Error("general.user_guided should remain true (default)")
+	if cfg.Specifying.Eval.MinRounds != 2 {
+		t.Errorf("specifying.eval.min_rounds: got %d, want 2", cfg.Specifying.Eval.MinRounds)
+	}
+	if cfg.Specifying.Eval.Model != "haiku" {
+		t.Errorf("specifying.eval.model: got %q, want %q", cfg.Specifying.Eval.Model, "haiku")
+	}
+	if !cfg.Specifying.Eval.EnableEvalOutput {
+		t.Error("specifying.eval.enable_eval_output: want true")
+	}
+	if cfg.Implementing.Batch != 3 {
+		t.Errorf("implementing.batch: got %d, want 3", cfg.Implementing.Batch)
+	}
+	if cfg.Paths.StateDir != ".custom/state" {
+		t.Errorf("paths.state_dir: got %q, want %q", cfg.Paths.StateDir, ".custom/state")
+	}
+	if cfg.Logs.Enabled {
+		t.Error("logs.enabled: want false")
+	}
+	if cfg.Logs.RetentionDays != 30 {
+		t.Errorf("logs.retention_days: got %d, want 30", cfg.Logs.RetentionDays)
 	}
 }
 
-func TestLoadConfigMissingFileReturnsDefaults(t *testing.T) {
+// TestLoadConfigInvalidToml verifies an error is returned for malformed TOML.
+func TestLoadConfigInvalidToml(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".forgectl"), 0755)
-	// No config file — LoadConfig should succeed with defaults.
-	cfg, err := LoadConfig(dir)
-	if err != nil {
-		t.Fatalf("LoadConfig with missing file: %v", err)
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	if cfg.Implementing.Batch != 2 {
-		t.Errorf("expected default implementing.batch=2, got %d", cfg.Implementing.Batch)
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte("[[not valid toml..."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid TOML, got nil")
 	}
 }
 
+// TestGenerateSessionID verifies UUID v4 format and uniqueness.
+func TestGenerateSessionID(t *testing.T) {
+	id := GenerateSessionID()
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 {
+		t.Fatalf("session ID %q: expected 5 parts separated by '-', got %d", id, len(parts))
+	}
+	if len(parts[0]) != 8 || len(parts[1]) != 4 || len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		t.Errorf("session ID %q: unexpected segment lengths", id)
+	}
+	// Version 4: third segment starts with '4'
+	if parts[2][0] != '4' {
+		t.Errorf("session ID %q: version nibble must be '4', got %c", id, parts[2][0])
+	}
+	// Uniqueness: two calls must differ
+	id2 := GenerateSessionID()
+	if id == id2 {
+		t.Error("two GenerateSessionID calls returned the same value")
+	}
+}
+
+// TestValidateConfigValid verifies no errors for a valid config.
 func TestValidateConfigValid(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultForgeConfig()
 	errs := ValidateConfig(cfg)
-	if len(errs) != 0 {
-		t.Errorf("ValidateConfig(DefaultConfig()) returned errors: %v", errs)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
+// TestValidateConfigBadStrategy verifies commit strategy validation.
+func TestValidateConfigBadStrategy(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Implementing.CommitStrategy = "unknown"
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error for invalid commit_strategy")
+	}
+}
+
+// TestValidateConfigMinExceedsMax verifies min_rounds <= max_rounds constraint.
+func TestValidateConfigMinExceedsMax(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Planning.Eval.MinRounds = 5
+	cfg.Planning.Eval.MaxRounds = 3
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error when planning.eval.min_rounds > max_rounds")
+	}
+}
+
+// TestValidateConfigNestedDomains verifies nested domain paths are rejected.
+func TestValidateConfigNestedDomains(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Domains = []DomainConfig{
+		{Name: "parent", Path: "apps"},
+		{Name: "child", Path: "apps/sub"},
+	}
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error for nested domain paths")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "Domain paths must not be nested:") && strings.Contains(e, "apps") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected spec-format nesting error, got: %v", errs)
+	}
+}
+
+// TestValidateConfigBatchBelowOne verifies batch < 1 is rejected.
 func TestValidateConfigBatchBelowOne(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultForgeConfig()
 	cfg.Specifying.Batch = 0
 	errs := ValidateConfig(cfg)
 	if len(errs) == 0 {
@@ -104,7 +271,7 @@ func TestValidateConfigBatchBelowOne(t *testing.T) {
 	}
 	found := false
 	for _, e := range errs {
-		if containsString(e, "specifying.batch") {
+		if strings.Contains(e, "specifying.batch") {
 			found = true
 		}
 	}
@@ -113,34 +280,12 @@ func TestValidateConfigBatchBelowOne(t *testing.T) {
 	}
 }
 
-func TestValidateConfigMinRoundsExceedsMax(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Implementing.Eval.MinRounds = 5
-	cfg.Implementing.Eval.MaxRounds = 2
-	errs := ValidateConfig(cfg)
-	if len(errs) == 0 {
-		t.Error("expected violation for min_rounds > max_rounds")
-	}
-}
-
+// TestValidateConfigLogsRetentionDaysNegative verifies negative retention days are rejected.
 func TestValidateConfigLogsRetentionDaysNegative(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultForgeConfig()
 	cfg.Logs.RetentionDays = -1
 	errs := ValidateConfig(cfg)
 	if len(errs) == 0 {
 		t.Error("expected violation for logs.retention_days=-1")
 	}
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

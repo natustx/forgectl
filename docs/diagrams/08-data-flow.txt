@@ -39,13 +39,13 @@
   ║                                                                      ║
   ║  Inputs:                          Outputs:                           ║
   ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
-  ║  │ spec-queue.json      │          │ <project>/specs/             │   ║
+  ║  │ spec-queue.json      │          │ <domain>/specs/              │   ║
   ║  │                      │    ──►   │ ├── <spec-a>.md              │   ║
   ║  │ {specs: [{           │          │ ├── <spec-b>.md              │   ║
   ║  │   name, domain,      │          │ ├── <spec-c>.md              │   ║
   ║  │   topic, file,       │          │ └── .eval/                   │   ║
-  ║  │   planning_sources,  │          │     ├── <spec-a>-r1.md       │   ║
-  ║  │   depends_on         │          │     └── <spec-a>-r2.md       │   ║
+  ║  │   planning_sources,  │          │     ├── batch-1-r1.md        │   ║
+  ║  │   depends_on         │          │     └── batch-1-r2.md        │   ║
   ║  │ }]}                  │          └─────────────────────────────┘   ║
   ║  └─────────────────────┘                                             ║
   ║                                   ┌─────────────────────────────┐   ║
@@ -54,10 +54,34 @@
   ║                                   └─────────────────────────────┘   ║
   ╚════════════════════════╤═════════════════════════════════════════════╝
                            │
-                           │  specs flow down
+                           │  completed specs + commit hashes flow down
                            ▼
   ╔══════════════════════════════════════════════════════════════════════╗
-  ║  PHASE 2: PLANNING                                                  ║
+  ║  PHASE 2: GENERATE PLANNING QUEUE                                   ║
+  ║                                                                      ║
+  ║  Inputs:                          Outputs:                           ║
+  ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
+  ║  │ Completed specs data │          │ .forgectl/state/             │   ║
+  ║  │ from state (auto-gen)│    ──►   │ plan-queue.json              │   ║
+  ║  │                      │          │                              │   ║
+  ║  │ OR: --from override  │          │ {plans: [{                   │   ║
+  ║  │ (skips this phase    │          │   name, domain,              │   ║
+  ║  │  entirely)           │          │   file, specs[],             │   ║
+  ║  └─────────────────────┘          │   spec_commits[],            │   ║
+  ║                                   │   code_search_roots[]        │   ║
+  ║                                   │ }]}                          │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ .forgectl/state/             │   ║
+  ║                                   │ forgectl-state.json (state)  │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ╚════════════════════════╤═════════════════════════════════════════════╝
+                           │
+                           │  plan-queue.json flows down
+                           ▼
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  PHASE 3: PLANNING                                                  ║
   ║                                                                      ║
   ║  Inputs:                          Outputs:                           ║
   ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
@@ -65,13 +89,14 @@
   ║  │                      │          │   implementation_plan/       │   ║
   ║  │ {plans: [{           │    ──►   │   ├── plan.json              │   ║
   ║  │   name, domain,      │          │   ├── notes/                 │   ║
-  ║  │   topic, file,       │          │   │   ├── <pkg-a>.md         │   ║
-  ║  │   specs[],           │          │   │   └── <pkg-b>.md         │   ║
+  ║  │   file, specs[],     │          │   │   ├── <pkg-a>.md         │   ║
+  ║  │   spec_commits[],    │          │   │   └── <pkg-b>.md         │   ║
   ║  │   code_search_roots[]│          │   └── evals/                 │   ║
   ║  │ }]}                  │          │       ├── round-1.md          │   ║
   ║  └─────────────────────┘          │       └── round-2.md          │   ║
   ║                                   └─────────────────────────────┘   ║
   ║  Spec files (read-only)                                              ║
+  ║  Evaluator prompt: evaluators/plan-eval.md (embedded in binary)     ║
   ║  Source code (read-only)          ┌─────────────────────────────┐   ║
   ║  Package manifests (read-only)    │ .forgectl/state/             │   ║
   ║                                   │ forgectl-state.json (state)  │   ║
@@ -82,7 +107,7 @@
                            │  (mutated with passes/rounds)
                            ▼
   ╔══════════════════════════════════════════════════════════════════════╗
-  ║  PHASE 3: IMPLEMENTING                                              ║
+  ║  PHASE 4: IMPLEMENTING                                              ║
   ║                                                                      ║
   ║  Inputs:                          Outputs:                           ║
   ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
@@ -95,8 +120,10 @@
   ║                                   │   implementation_plan/       │   ║
   ║  Spec files (read-only)           │   └── evals/                 │   ║
   ║  Notes files (read-only)          │       ├── batch-1-round-1.md │   ║
-  ║  Source code (read/write)         │       └── batch-1-round-2.md │   ║
-  ║                                   └─────────────────────────────┘   ║
+  ║  Evaluator prompt:                │       └── batch-1-round-2.md │   ║
+  ║    evaluators/impl-eval.md        └─────────────────────────────┘   ║
+  ║    (embedded in binary)                                              ║
+  ║  Source code (read/write)                                            ║
   ║                                                                      ║
   ║                                   ┌─────────────────────────────┐   ║
   ║                                   │ <domain>/.forge_workspace/   │   ║
@@ -128,7 +155,8 @@
   │  .forgectl/state/forgectl-state.json                                 │
   │                                                                      │
   │  {                                                                   │
-  │    "phase": "specifying | planning | implementing",                  │
+  │    "phase": "specifying | generate_planning_queue | planning |        │
+  │             implementing",                                           │
   │    "state": "<current state>",                                       │
   │    "started_at_phase": "specifying | planning | implementing",       │
   │    "config": {                                                       │
@@ -160,7 +188,7 @@
   │  context ─────► { domain: "api", module: "github.com/org/api" }     │
   │                                                                      │
   │  refs ────────► [                                                    │
-  │                   { id: "auth-spec", path: "../../specs/auth.md" }   │
+  │                   { id: "notes-config", path: "notes/config.md" }    │
   │                 ]                                                     │
   │                                                                      │
   │  layers ──────► [                                                    │
@@ -180,8 +208,8 @@
   │      depends_on: [],                                                 │
   │      steps: ["Create types.go", "Add validation tags"],              │
   │      files: ["internal/config/types.go"],                            │
-  │      spec: "service-configuration.md",                               │
-  │      ref: "notes/config.md",                                         │
+  │      specs: ["service-configuration.md"],                            │
+  │      refs: ["notes/config.md"],                                      │
   │      tests: [                                                        │
   │        { category: "functional", description: "loads valid" },       │
   │        { category: "rejection",  description: "rejects empty" },     │
@@ -193,3 +221,23 @@
   │    ...                                                               │
   │  ]                                                                   │
   └──────────────────────────────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  PATH RESOLUTION RULES
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Paths in plan.json are resolved relative to different roots:
+
+  ┌─────────────────────────────┬────────────────────────────────────────┐
+  │ Field                       │ Resolved relative to                   │
+  ├─────────────────────────────┼────────────────────────────────────────┤
+  │ refs[].path                 │ plan.json directory                    │
+  │                             │ (<domain>/<ws>/implementation_plan/)   │
+  │ items[].refs (notes files)  │ plan.json directory                    │
+  │ items[].specs (spec files)  │ project root                           │
+  │ items[].files (source files)│ project root                           │
+  └─────────────────────────────┴────────────────────────────────────────┘
+
+  The validation gate resolves all paths before allowing EVALUATE.
+  refs[].path and items[].refs must point to existing files on disk.

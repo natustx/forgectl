@@ -115,8 +115,8 @@ func TestValidateAutoDetectsPlan(t *testing.T) {
 	if !strings.Contains(out, "plan") {
 		t.Errorf("output should mention plan, got: %q", out)
 	}
-	if !strings.Contains(out, "1 items") {
-		t.Errorf("output should show 1 items, got: %q", out)
+	if !strings.Contains(out, "no errors") {
+		t.Errorf("output should say no errors, got: %q", out)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestValidatePlanResolvesRefsRelativeToFile(t *testing.T) {
 		Refs:    []state.PlanRef{{ID: "r1", Path: "notes/item1.md"}},
 		Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Base", Items: []string{"item1"}}},
 		Items: []state.PlanItem{
-			{ID: "item1", Name: "Item One", Description: "desc", Ref: "notes/item1.md", DependsOn: []string{}, Tests: []state.PlanTest{}},
+			{ID: "item1", Name: "Item One", Description: "desc", Refs: []string{"notes/item1.md"}, DependsOn: []string{}, Tests: []state.PlanTest{}},
 		},
 	}
 	data, _ := json.Marshal(plan)

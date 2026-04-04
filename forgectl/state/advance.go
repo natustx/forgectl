@@ -23,7 +23,9 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 
 	switch s.Phase {
 	case PhaseSpecifying:
-		return advanceSpecifying(s, in)
+		return advanceSpecifying(s, in, dir)
+	case PhaseGeneratePlanningQueue:
+		return advanceGeneratePlanningQueue(s, in, dir)
 	case PhasePlanning:
 		return advancePlanning(s, in, dir)
 	case PhaseImplementing:
@@ -35,7 +37,7 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 
 // --- Specifying Phase ---
 
-func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
+func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 	spec := s.Specifying
 
 	switch s.State {
@@ -46,6 +48,9 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 		firstDomain := spec.Queue[0].Domain
 		batchSize := s.Config.Specifying.Batch
+		if batchSize < 1 {
+			batchSize = 1
+		}
 		var taken int
 		for taken < len(spec.Queue) && taken < batchSize && spec.Queue[taken].Domain == firstDomain {
 			taken++
@@ -83,14 +88,23 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in EVALUATE state")
+		// Per spec-lifecycle.md, EVALUATE only accepts --verdict and --eval-report.
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in EVALUATE state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			// Warn but proceed — consistent with spec warning pattern.
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
 		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
 		}
 
 		eval := EvalRecord{
@@ -107,9 +121,6 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 
 		if in.Verdict == "PASS" {
 			if cs.Round >= minRounds {
-				if s.Config.General.EnableCommits && in.Message == "" {
-					return fmt.Errorf("--message is required when --verdict is PASS and enable_commits is true")
-				}
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -173,14 +184,21 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in CROSS_REFERENCE_EVAL state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state")
-		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		}
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
 		}
 
 		currentDomain := spec.CurrentDomain
@@ -224,14 +242,21 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in RECONCILE_EVAL state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state")
-		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		}
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
 		}
 
 		eval := EvalRecord{
@@ -247,9 +272,6 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		forced := in.Verdict == "FAIL" && spec.Reconcile.Round >= maxRounds
 		passed := in.Verdict == "PASS" && spec.Reconcile.Round >= minRounds
 		if passed || forced {
-			if s.Config.General.EnableCommits && in.Verdict == "PASS" && in.Message == "" {
-				return fmt.Errorf("--message is required when --verdict is PASS and enable_commits is true")
-			}
 			// RECONCILE_REVIEW fires once — only on the first passing (or forced) eval (round==1).
 			if spec.Reconcile.Round == 1 {
 				s.State = StateReconcileReview
@@ -270,14 +292,94 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 
 	case StateComplete:
+		if s.Config.General.EnableCommits {
+			if in.Message == "" {
+				return fmt.Errorf("--message is required in COMPLETE state when enable_commits is true")
+			}
+			// Collect spec files from all completed specs.
+			var stageTargets []string
+			for _, cs := range spec.Completed {
+				if cs.File != "" {
+					stageTargets = append(stageTargets, cs.File)
+				}
+			}
+			hash, err := AutoCommit(dir, s.Config.Specifying.CommitStrategy, stageTargets, in.Message)
+			if err != nil {
+				return err
+			}
+			if hash != "" {
+				for i := range spec.Completed {
+					spec.Completed[i].CommitHashes = append(spec.Completed[i].CommitHashes, hash)
+				}
+			}
+		}
 		s.State = StatePhaseShift
-		s.PhaseShift = &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning}
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseSpecifying, To: PhaseGeneratePlanningQueue}
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in specifying phase", s.State)
 	}
 
 	return nil
+}
+
+// specCrossRefNextOrDone moves to ORIENT if more domains remain in the queue,
+// or to DONE when all queue items are exhausted.
+func specCrossRefNextOrDone(s *ForgeState) {
+	spec := s.Specifying
+	if len(spec.Queue) > 0 {
+		// More specs in other domains — continue with ORIENT.
+		s.State = StateOrient
+	} else {
+		s.State = StateDone
+	}
+}
+
+// --- Generate Planning Queue Phase ---
+
+func advanceGeneratePlanningQueue(s *ForgeState, in AdvanceInput, dir string) error {
+	switch s.State {
+	case StateOrient:
+		s.State = StateRefine
+
+	case StateRefine:
+		// Validate the plan-queue.json file.
+		planQueueFile := s.GeneratePlanningQueue.PlanQueueFile
+		if dir != "" {
+			planQueueFile = filepath.Join(dir, planQueueFile)
+		}
+		data, err := os.ReadFile(planQueueFile)
+		if err != nil {
+			return fmt.Errorf("reading plan queue %q: %w", planQueueFile, err)
+		}
+		validationErrs := ValidatePlanQueue(data)
+		if len(validationErrs) > 0 {
+			return &ValidationError{Errors: validationErrs}
+		}
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseGeneratePlanningQueue, To: PhasePlanning}
+
+	default:
+		return fmt.Errorf("cannot advance from state %q in generate_planning_queue phase", s.State)
+	}
+	return nil
+}
+
+// populatePlanningFromQueue pulls the first entry from the planning queue into CurrentPlan.
+func populatePlanningFromQueue(s *ForgeState) {
+	if len(s.Planning.Queue) > 0 {
+		entry := s.Planning.Queue[0]
+		s.Planning.Queue = s.Planning.Queue[1:]
+		s.Planning.CurrentPlan = &ActivePlan{
+			ID:              1,
+			Name:            entry.Name,
+			Domain:          entry.Domain,
+			File:            entry.File,
+			Specs:           entry.Specs,
+			SpecCommits:     entry.SpecCommits,
+			CodeSearchRoots: entry.CodeSearchRoots,
+		}
+	}
 }
 
 // --- Planning Phase ---
@@ -347,10 +449,49 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		s.Planning.Round++
 		return advancePlanningFromDraftOrRefine(s, dir)
 
+	case StateSelfReview:
+		return advancePlanningFromSelfReview(s, dir)
+
 	case StateAccept:
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
 		}
+		// Add current plan to completed.
+		if s.Planning.CurrentPlan != nil {
+			s.Planning.Completed = append(s.Planning.Completed, CompletedPlan{
+				ID:     s.Planning.CurrentPlan.ID,
+				Name:   s.Planning.CurrentPlan.Name,
+				Domain: s.Planning.CurrentPlan.Domain,
+				File:   s.Planning.CurrentPlan.File,
+			})
+		}
+		if s.Config.Planning.PlanAllBeforeImplementing && len(s.Planning.Queue) > 0 {
+			// Pop next plan from queue and continue planning.
+			entry := s.Planning.Queue[0]
+			s.Planning.Queue = s.Planning.Queue[1:]
+			s.Planning.Round = 0
+			s.Planning.Evals = nil
+			s.Planning.CurrentPlan = &ActivePlan{
+				ID:              s.Planning.CurrentPlan.ID + 1,
+				Name:            entry.Name,
+				Domain:          entry.Domain,
+				File:            entry.File,
+				Specs:           entry.Specs,
+				SpecCommits:     entry.SpecCommits,
+				CodeSearchRoots: entry.CodeSearchRoots,
+			}
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhasePlanning}
+		} else {
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		}
+
+	case StateDone:
+		if in.Verdict != "" || in.EvalReport != "" || in.Message != "" {
+			return fmt.Errorf("DONE is a pass-through state. No flags accepted.")
+		}
+		// Pass-through: advance to phase shift.
 		s.State = StatePhaseShift
 		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
 
@@ -389,7 +530,11 @@ func advancePlanningFromDraftOrRefine(s *ForgeState, dir string) error {
 	if fromDraft {
 		s.Planning.Round = 1
 	}
-	s.State = StateEvaluate
+	if fromDraft && s.Config.Planning.SelfReview {
+		s.State = StateSelfReview
+	} else {
+		s.State = StateEvaluate
+	}
 	return nil
 }
 
@@ -405,6 +550,30 @@ func advancePlanningFromValidate(s *ForgeState, dir string) error {
 	baseDir := filepath.Dir(fullPath)
 	validationErrs := ValidatePlanJSON(data, baseDir)
 	if len(validationErrs) > 0 {
+		return &ValidationError{Errors: validationErrs}
+	}
+
+	if s.Config.Planning.SelfReview {
+		s.State = StateSelfReview
+	} else {
+		s.State = StateEvaluate
+	}
+	return nil
+}
+
+func advancePlanningFromSelfReview(s *ForgeState, dir string) error {
+	planPath := s.Planning.CurrentPlan.File
+	fullPath := filepath.Join(dir, planPath)
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("cannot read plan file %q: %w", planPath, err)
+	}
+
+	baseDir := filepath.Dir(fullPath)
+	validationErrs := ValidatePlanJSON(data, baseDir)
+	if len(validationErrs) > 0 {
+		s.State = StateValidate
 		return &ValidationError{Errors: validationErrs}
 	}
 
@@ -446,7 +615,18 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 	case StateDone:
-		return fmt.Errorf("session complete.")
+		// Check for remaining plans.
+		if s.Planning != nil && len(s.Planning.Queue) > 0 {
+			// Interleaved mode: return to planning for next plan.
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhaseImplementing, To: PhasePlanning}
+		} else if impl != nil && len(impl.PlanQueue) > 0 {
+			// All-first mode: implement next plan from queue.
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhaseImplementing, To: PhaseImplementing}
+		} else {
+			return fmt.Errorf("session complete.")
+		}
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in implementing phase", s.State)
@@ -554,14 +734,13 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	if in.Verdict == "" {
 		return fmt.Errorf("--verdict is required in EVALUATE state")
 	}
-	if in.EvalReport == "" {
-		return fmt.Errorf("--eval-report is required in EVALUATE state")
-	}
 	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 		return fmt.Errorf("--verdict must be PASS or FAIL")
 	}
-	if err := checkEvalReportExists(in.EvalReport); err != nil {
-		return err
+	if in.EvalReport != "" {
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
 	}
 
 	impl := s.Implementing
@@ -626,11 +805,9 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 
 	switch {
-	case s.PhaseShift.From == PhaseSpecifying && s.PhaseShift.To == PhasePlanning:
-		var plans []PlanQueueEntry
-
+	case s.PhaseShift.From == PhaseSpecifying && s.PhaseShift.To == PhaseGeneratePlanningQueue:
 		if in.From != "" {
-			// Override mode: validate and use external file.
+			// --from provided: skip generate_planning_queue phase, go directly to planning.
 			data, err := os.ReadFile(in.From)
 			if err != nil {
 				return fmt.Errorf("reading plan queue: %w", err)
@@ -643,35 +820,50 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			if err := json.Unmarshal(data, &input); err != nil {
 				return fmt.Errorf("parsing plan queue: %w", err)
 			}
-			plans = input.Plans
+			s.Planning = NewPlanningState(input.Plans)
+			populatePlanningFromQueue(s)
+			s.Phase = PhasePlanning
+			s.State = StateOrient
+			s.PhaseShift = nil
 		} else {
-			// Auto-generate from completed specs.
-			plans = autoGeneratePlanQueue(s.Specifying)
-			data, err := json.Marshal(PlanQueueInput{Plans: plans})
+			// Auto-generate from completed specs, write to file, enter generate_planning_queue.
+			relPath, err := autoGeneratePlanQueue(s, dir)
 			if err != nil {
-				return fmt.Errorf("marshaling auto-generated queue: %w", err)
+				return fmt.Errorf("auto-generating plan queue: %w", err)
 			}
-			validationErrs := ValidatePlanQueue(data)
-			if len(validationErrs) > 0 {
-				return &ValidationError{Errors: validationErrs}
-			}
+			s.GeneratePlanningQueue = &GeneratePlanningQueueState{PlanQueueFile: relPath}
+			s.Phase = PhaseGeneratePlanningQueue
+			s.State = StateOrient
+			s.PhaseShift = nil
 		}
 
-		s.Planning = NewPlanningState(plans)
-		// Pull first plan.
-		if len(s.Planning.Queue) > 0 {
-			entry := s.Planning.Queue[0]
-			s.Planning.Queue = s.Planning.Queue[1:]
-			s.Planning.CurrentPlan = &ActivePlan{
-				ID:              1,
-				Name:            entry.Name,
-				Domain:          entry.Domain,
-				File:            entry.File,
-				Specs:           entry.Specs,
-				SpecCommits:     entry.SpecCommits,
-				CodeSearchRoots: entry.CodeSearchRoots,
+	case s.PhaseShift.From == PhaseGeneratePlanningQueue && s.PhaseShift.To == PhasePlanning:
+		planQueueFile := s.GeneratePlanningQueue.PlanQueueFile
+		if dir != "" {
+			planQueueFile = filepath.Join(dir, planQueueFile)
+		}
+		data, err := os.ReadFile(planQueueFile)
+		if err != nil {
+			return fmt.Errorf("reading plan queue: %w", err)
+		}
+
+		var input PlanQueueInput
+		if inFile := in.From; inFile != "" {
+			// Override with provided file.
+			data, err = os.ReadFile(inFile)
+			if err != nil {
+				return fmt.Errorf("reading plan queue override: %w", err)
 			}
 		}
+		validationErrs := ValidatePlanQueue(data)
+		if len(validationErrs) > 0 {
+			return &ValidationError{Errors: validationErrs}
+		}
+		if err := json.Unmarshal(data, &input); err != nil {
+			return fmt.Errorf("parsing plan queue: %w", err)
+		}
+		s.Planning = NewPlanningState(input.Plans)
+		populatePlanningFromQueue(s)
 		s.Phase = PhasePlanning
 		s.State = StateOrient
 		s.PhaseShift = nil
@@ -712,7 +904,63 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 		s.Implementing = NewImplementingState()
+		s.Implementing.CurrentPlanFile = planPath
 		s.Phase = PhaseImplementing
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhasePlanning && s.PhaseShift.To == PhasePlanning:
+		// PlanAllBeforeImplementing: advance to next plan in queue.
+		s.Planning.Round = 0
+		s.Planning.Evals = nil
+		s.Phase = PhasePlanning
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhaseImplementing:
+		// All-first mode: pop next plan from Implementing.PlanQueue.
+		impl := s.Implementing
+		if len(impl.PlanQueue) > 0 {
+			entry := impl.PlanQueue[0]
+			impl.PlanQueue = impl.PlanQueue[1:]
+			impl.CurrentPlanFile = entry.File
+			impl.CurrentLayer = nil
+			impl.BatchNumber = 0
+			impl.CurrentBatch = nil
+			if s.Planning != nil {
+				s.Planning.CurrentPlan = &ActivePlan{
+					ID:              s.Planning.CurrentPlan.ID + 1,
+					Name:            entry.Name,
+					Domain:          entry.Domain,
+					File:            entry.File,
+					Specs:           entry.Specs,
+					SpecCommits:     entry.SpecCommits,
+					CodeSearchRoots: entry.CodeSearchRoots,
+				}
+			}
+		}
+		s.Phase = PhaseImplementing
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhasePlanning:
+		// Interleaved mode: next plan from Planning.Queue.
+		if len(s.Planning.Queue) > 0 {
+			entry := s.Planning.Queue[0]
+			s.Planning.Queue = s.Planning.Queue[1:]
+			s.Planning.Round = 0
+			s.Planning.Evals = nil
+			s.Planning.CurrentPlan = &ActivePlan{
+				ID:              s.Planning.CurrentPlan.ID + 1,
+				Name:            entry.Name,
+				Domain:          entry.Domain,
+				File:            entry.File,
+				Specs:           entry.Specs,
+				SpecCommits:     entry.SpecCommits,
+				CodeSearchRoots: entry.CodeSearchRoots,
+			}
+		}
+		s.Phase = PhasePlanning
 		s.State = StateOrient
 		s.PhaseShift = nil
 
@@ -723,15 +971,15 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 	return nil
 }
 
-// --- Helpers ---
-
-// autoGeneratePlanQueue builds a plan queue from completed specifying-phase specs.
+// autoGeneratePlanQueue builds a plan queue from completed specifying-phase specs,
+// writes it to disk, and returns the relative path and any error.
 // One PlanQueueEntry is produced per domain, preserving domain order of first appearance.
-func autoGeneratePlanQueue(spec *SpecifyingState) []PlanQueueEntry {
+func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
+	spec := s.Specifying
+
 	// Group specs by domain, preserving order of first appearance.
 	type domainGroup struct {
-		specs   []CompletedSpec
-		seenIdx int
+		specs []CompletedSpec
 	}
 	groupMap := make(map[string]*domainGroup)
 	var domainOrder []string
@@ -743,48 +991,80 @@ func autoGeneratePlanQueue(spec *SpecifyingState) []PlanQueueEntry {
 		groupMap[cs.Domain].specs = append(groupMap[cs.Domain].specs, cs)
 	}
 
-	var plans []PlanQueueEntry
+	var entries []PlanQueueEntry
 	for _, domain := range domainOrder {
 		group := groupMap[domain]
 
+		// Collect spec file paths.
 		var specFiles []string
-		commitSet := make(map[string]bool)
-		var specCommits []string
 		for _, cs := range group.specs {
 			specFiles = append(specFiles, cs.File)
+		}
+
+		// Determine code search roots from Domains metadata.
+		var roots []string
+		if spec.Domains != nil {
+			if meta, ok := spec.Domains[domain]; ok {
+				roots = meta.CodeSearchRoots
+			}
+		}
+		if len(roots) == 0 {
+			roots = []string{domain + "/"}
+		}
+
+		// Deduplicate commit hashes.
+		seen := map[string]bool{}
+		var commits []string
+		for _, cs := range group.specs {
 			for _, h := range cs.CommitHashes {
-				if !commitSet[h] {
-					commitSet[h] = true
-					specCommits = append(specCommits, h)
+				if h != "" && !seen[h] {
+					seen[h] = true
+					commits = append(commits, h)
 				}
 			}
 		}
 
-		var roots []string
-		if meta, ok := spec.Domains[domain]; ok && len(meta.CodeSearchRoots) > 0 {
-			roots = meta.CodeSearchRoots
-		} else {
-			roots = []string{domain + "/"}
+		// Capitalize first letter of domain for display name.
+		displayName := domain
+		if len(displayName) > 0 {
+			displayName = strings.ToUpper(displayName[:1]) + displayName[1:]
 		}
 
-		// Capitalize first letter of domain name.
-		name := strings.ToUpper(domain[:1]) + domain[1:] + " Implementation Plan"
-
-		plans = append(plans, PlanQueueEntry{
-			Name:            name,
+		entries = append(entries, PlanQueueEntry{
+			Name:            displayName + " Implementation Plan",
 			Domain:          domain,
 			File:            domain + "/.forge_workspace/implementation_plan/plan.json",
 			Specs:           specFiles,
-			SpecCommits:     specCommits,
+			SpecCommits:     commits,
 			CodeSearchRoots: roots,
 		})
 	}
-	return plans
+
+	relPath := filepath.Join(".forgectl", "state", "plan-queue.json")
+	absPath := relPath
+	if dir != "" {
+		absPath = filepath.Join(dir, relPath)
+	}
+	data, err := json.MarshalIndent(PlanQueueInput{Plans: entries}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshaling plan queue: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		return "", fmt.Errorf("creating plan queue dir: %w", err)
+	}
+	if err := os.WriteFile(absPath, data, 0644); err != nil {
+		return "", fmt.Errorf("writing plan queue: %w", err)
+	}
+	return relPath, nil
 }
+
+// --- Helpers ---
 
 func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 	var planPath string
-	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
+		planPath = s.Implementing.CurrentPlanFile
+	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
 		planPath = s.Planning.CurrentPlan.File
 	}
 	if planPath == "" {
@@ -807,7 +1087,9 @@ func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 
 func savePlan(s *ForgeState, dir string, plan *PlanJSON) error {
 	var planPath string
-	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
+		planPath = s.Implementing.CurrentPlanFile
+	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
 		planPath = s.Planning.CurrentPlan.File
 	}
 	if planPath == "" {
@@ -933,16 +1215,6 @@ func archiveBatch(s *ForgeState) {
 	}
 
 	impl.CurrentBatch = nil
-}
-
-// specCrossRefNextOrDone advances to ORIENT if any specs remain in the queue,
-// or to DONE if the queue is exhausted (all domains cross-referenced).
-func specCrossRefNextOrDone(s *ForgeState) {
-	if len(s.Specifying.Queue) > 0 {
-		s.State = StateOrient
-	} else {
-		s.State = StateDone
-	}
 }
 
 func checkEvalReportExists(path string) error {

@@ -77,22 +77,22 @@
   ║  │  ┌─────────────────────────────────────────┐     │        ║
   ║  │  │  EVALUATE                                │     │        ║
   ║  │  │                                          │     │        ║
-  ║  │  │  Spawn Opus sub-agent to review spec     │     │        ║
-  ║  │  │  against 11 dimensions:                  │     │        ║
-  ║  │  │                                          │     │        ║
-  ║  │  │   1. Behavior coverage                   │     │        ║
-  ║  │  │   2. Error handling                      │     │        ║
-  ║  │  │   3. Rejection cases                     │     │        ║
-  ║  │  │   4. Interface (inputs/outputs)          │     │        ║
-  ║  │  │   5. Configuration                       │     │        ║
-  ║  │  │   6. Observability/logging               │     │        ║
-  ║  │  │   7. Integration points                  │     │        ║
-  ║  │  │   8. Invariants                          │     │        ║
-  ║  │  │   9. Edge cases                          │     │        ║
-  ║  │  │  10. Testing criteria                    │     │        ║
-  ║  │  │  11. Dependencies & format               │     │        ║
-  ║  │  │                                          │     │        ║
-  ║  │  │  Output: specs/.eval/<name>-rN.md        │     │        ║
+  ║  │  │  Spawn Opus sub-agent to review spec batch │     │        ║
+  ║  │  │  against 11 dimensions:                    │     │        ║
+  ║  │  │                                            │     │        ║
+  ║  │  │   1. Behavior coverage                     │     │        ║
+  ║  │  │   2. Error handling                        │     │        ║
+  ║  │  │   3. Rejection cases                       │     │        ║
+  ║  │  │   4. Interface (inputs/outputs)            │     │        ║
+  ║  │  │   5. Configuration                         │     │        ║
+  ║  │  │   6. Observability/logging                 │     │        ║
+  ║  │  │   7. Integration points                    │     │        ║
+  ║  │  │   8. Invariants                            │     │        ║
+  ║  │  │   9. Edge cases                            │     │        ║
+  ║  │  │  10. Testing criteria                      │     │        ║
+  ║  │  │  11. Dependencies & format                 │     │        ║
+  ║  │  │                                            │     │        ║
+  ║  │  │  Output: <domain>/specs/.eval/batch-N-rN.md│     │        ║
   ║  │  │                                          │     │        ║
   ║  │  │  Action: forgectl advance \              │     │        ║
   ║  │  │    --verdict PASS|FAIL \                 │     │        ║
@@ -118,10 +118,10 @@
   ║  ┌─────────────────────────────────────────────────┐         ║
   ║  │  ACCEPT                                          │         ║
   ║  │                                                  │         ║
-  ║  │  Spec finalized.                                 │         ║
+  ║  │  Spec finalized. No commit here —                │         ║
+  ║  │  single commit occurs at COMPLETE.               │         ║
   ║  │                                                  │         ║
   ║  │  Action: forgectl advance                        │         ║
-  ║  │  (--message if general.enable_commits = true)    │         ║
   ║  └──────────────────────┬──────────────────────────┘         ║
   ║                         │                                     ║
   ║            ┌────────────┴────────────┐                        ║
@@ -141,13 +141,12 @@
   ║  ┌─────────────────────────────────────────────────┐         ║
   ║  │  RECONCILE                                       │         ║
   ║  │                                                  │         ║
-  ║  │  Cross-validate ALL specs:                       │         ║
+  ║  │  Cross-validate ALL specs across all domains:    │         ║
   ║  │  - Depends On refs point to existing specs       │         ║
   ║  │  - Integration Points are symmetric              │         ║
-  ║  │  - No circular dependencies                      │         ║
-  ║  │  - Naming consistency across all specs            │         ║
+  ║  │  - No circular cross-domain dependencies         │         ║
+  ║  │  - Naming consistency across all specs           │         ║
   ║  │                                                  │         ║
-  ║  │  Stage fixes: git add                            │         ║
   ║  │  Action: forgectl advance                        │         ║
   ║  └──────────────────────┬──────────────────────────┘         ║
   ║                         ▼                                     ║
@@ -158,19 +157,22 @@
   ║  │  specifying.reconciliation.min_rounds (def: 0)   │         ║
   ║  │  specifying.reconciliation.max_rounds (def: 3)   │         ║
   ║  │                                                  │         ║
-  ║  │  Action: forgectl advance \                      ║         ║
+  ║  │  Action: forgectl advance \                      │         ║
   ║  │    --verdict PASS|FAIL --eval-report <path>      │         ║
   ║  └──────────┬───────────────────┬──────────────────┘         ║
   ║             │                   │                             ║
   ║        PASS │              FAIL │                             ║
   ║             ▼                   ▼                             ║
-  ║        RECONCILE_REVIEW    RECONCILE_REVIEW                   ║
+  ║        RECONCILE_REVIEW    RECONCILE_REVIEW (or RECONCILE)    ║
   ║             │                   │                             ║
   ║         accept              ──► RECONCILE                     ║
   ║             │               (another pass)                    ║
   ║             ▼                                                 ║
   ║        COMPLETE                                               ║
+  ║        (--message required if enable_commits: true;           ║
+  ║         single specifying commit made here)                   ║
   ╚════════════╪══════════════════════════════════════════════════╝
                │
                ▼
-         PHASE_SHIFT ──► Planning Phase
+         PHASE_SHIFT ──► generate_planning_queue Phase ──► Planning Phase
+                    └──► Planning Phase directly (if --from provided)

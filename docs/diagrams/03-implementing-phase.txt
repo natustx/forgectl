@@ -1,5 +1,5 @@
 ================================================================================
-             PHASE 3: IMPLEMENTING — Detailed State Machine
+             PHASE 4: IMPLEMENTING — Detailed State Machine
 ================================================================================
 
   Role: Senior Software Engineer
@@ -31,6 +31,7 @@
   ║  │                                                                │  ║
   ║  │  - Review layer progress (e.g., "2/5 items passed")            │  ║
   ║  │  - Show next batch composition                                 │  ║
+  ║  │  - Show "Next: N unblocked items" line                         │  ║
   ║  │  - If guided: STOP and discuss with user                       │  ║
   ║  │                                                                │  ║
   ║  │  Action: forgectl advance                                      │  ║
@@ -53,21 +54,23 @@
   ║  ║  │  │           2. Add validation logic              │     │   ║   ║
   ║  ║  │  │           3. Wire into service init            │     │   ║   ║
   ║  ║  │  │  Files:   internal/config/load.go              │     │   ║   ║
-  ║  ║  │  │  Spec:    service-configuration.md             │     │   ║   ║
-  ║  ║  │  │  Ref:     notes/config.md                      │     │   ║   ║
+  ║  ║  │  │  Specs:   service-configuration.md             │     │   ║   ║
+  ║  ║  │  │           config-validation.md                 │     │   ║   ║
+  ║  ║  │  │  Refs:    notes/config.md                      │     │   ║   ║
   ║  ║  │  │  Tests:   3 (2 functional, 1 edge_case)        │     │   ║   ║
   ║  ║  │  └───────────────────────────────────────────────┘     │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Engineer actions:                                      │   ║   ║
-  ║  ║  │  1. Read spec section for contract                      │   ║   ║
-  ║  ║  │  2. Read notes/ref for guidance                         │   ║   ║
+  ║  ║  │  1. Read spec sections for contract                     │   ║   ║
+  ║  ║  │  2. Read notes/refs for guidance                        │   ║   ║
   ║  ║  │  3. Search codebase (confirm not already implemented)   │   ║   ║
   ║  ║  │  4. Implement completely — NO stubs, NO placeholders    │   ║   ║
   ║  ║  │  5. Run tests for changed/added code                    │   ║   ║
   ║  ║  │  6. Fix any failures                                    │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Action: forgectl advance --message "<what I did>"      │   ║   ║
-  ║  ║  │         (auto-commit on round 1 if enable_commits)      │   ║   ║
+  ║  ║  │         (--message required on first round if           │   ║   ║
+  ║  ║  │          enable_commits: true; auto-commit fires)       │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Item marked: pending ──► done                          │   ║   ║
   ║  ║  └────────────────────────┬────────────────────────────────┘   ║   ║
@@ -102,9 +105,13 @@
   ║  │  │     - Integration (works with deps?)                    │     │  ║
   ║  │  │                                                         │     │  ║
   ║  │  │  Output: evals/batch-N-round-M.md                       │     │  ║
+  ║  │  │         (only when enable_eval_output: true)            │     │  ║
   ║  │  │                                                         │     │  ║
-  ║  │  │  Action: forgectl advance \                              │     │  ║
-  ║  │  │    --eval-report <path> --verdict PASS|FAIL              │     │  ║
+  ║  │  │  Action (enable_eval_output: true):                     │     │  ║
+  ║  │  │    forgectl advance \                                   │     │  ║
+  ║  │  │      --eval-report <path> --verdict PASS|FAIL           │     │  ║
+  ║  │  │  Action (enable_eval_output: false):                    │     │  ║
+  ║  │  │    forgectl advance --verdict PASS|FAIL                 │     │  ║
   ║  │  └──────────┬──────────────────────┬──────────────────────┘     │  ║
   ║  │             │                      │                             │  ║
   ║  │   ┌─────── │ ──────────┐           │                             │  ║
@@ -116,9 +123,14 @@
   ║  │                        │                                         │  ║
   ║  │   IMPLEMENT (round 2+) │      COMMIT                             │  ║
   ║  │                        │     items: passed                        │  ║
-  ║  │   - Study eval report  │                                         │  ║
-  ║  │   - Fix deficiencies   │      COMMIT                             │  ║
-  ║  │   - Run tests          │     items: failed                        │  ║
+  ║  │   enable_eval_output:  │                                         │  ║
+  ║  │    true → Study eval   │      COMMIT                             │  ║
+  ║  │           report       │     items: failed (force-accept)         │  ║
+  ║  │    false → Use         │                                         │  ║
+  ║  │           evaluator    │                                         │  ║
+  ║  │           feedback     │                                         │  ║
+  ║  │   - Fix deficiencies   │                                         │  ║
+  ║  │   - Run tests          │                                         │  ║
   ║  │   - No --message       │                                         │  ║
   ║  │   - No auto-commit     │                                        │  ║
   ║  │                        │                                         │  ║
@@ -130,20 +142,15 @@
   ║                           │                                            ║
   ║                           ▼                                            ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
-  ║  │  COMMIT  (hard stop — must commit before continuing)           │   ║
-  ║  │  (--message required only when enable_commits = true)          │   ║
+  ║  │  COMMIT  (batch boundary — pause before continuing)            │   ║
   ║  │                                                                │   ║
-  ║  │  1. git add -A && git commit (if enable_commits = true)        │   ║
-  ║  │  2. Add entry to IMPLEMENTATION_LOG.md:                        │   ║
-  ║  │     ┌──────────────────────────────────────────────┐          │   ║
-  ║  │     │ ### 2026-03-29 — L1: Config Loading           │          │   ║
-  ║  │     │ - Errors: None                                │          │   ║
-  ║  │     │ - All Tests Pass: Yes                         │          │   ║
-  ║  │     │ - Batch: 1/3                                  │          │   ║
-  ║  │     │ - Eval Rounds: 2                              │          │   ║
-  ║  │     │ - Notes: Clean implementation, all tests pass │          │   ║
-  ║  │     └──────────────────────────────────────────────┘          │   ║
-  ║  │  3. forgectl advance --message "<commit msg>"                  │   ║
+  ║  │  When enable_commits: true                                     │   ║
+  ║  │    forgectl advance --message "<commit msg>"                   │   ║
+  ║  │    (auto-commits staged work before proceeding)                │   ║
+  ║  │                                                                │   ║
+  ║  │  When enable_commits: false                                    │   ║
+  ║  │    forgectl advance                                            │   ║
+  ║  │    (no commit, just proceed)                                   │   ║
   ║  └────────────────────────────┬───────────────────────────────────┘   ║
   ║                               │                                       ║
   ║              ┌────────────────┴────────────────┐                      ║
@@ -158,12 +165,23 @@
                                                     │
                                                     ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │  DONE  (terminal state)                                                 │
+  │  DONE                                                                   │
   │                                                                         │
   │  - All layers complete                                                  │
   │  - All items marked: passed or failed                                   │
-  │  - Final summary in IMPLEMENTATION_LOG.md                               │
-  │  - Session finished                                                     │
+  │  - Summary displayed for this domain                                    │
+  │                                                                         │
+  │  Transition depends on remaining plans and mode:                        │
+  │                                                                         │
+  │  plan_all_before_implementing: false (interleaved)                      │
+  │    - Planning queue non-empty →                                         │
+  │        PHASE_SHIFT (implementing → planning, next domain)               │
+  │    - Planning queue empty → session complete                            │
+  │                                                                         │
+  │  plan_all_before_implementing: true (all-planning-first)                │
+  │    - Implementing plan queue non-empty →                                │
+  │        PHASE_SHIFT (implementing → implementing, next domain)           │
+  │    - Implementing plan queue empty → session complete                   │
   └─────────────────────────────────────────────────────────────────────────┘
 
 

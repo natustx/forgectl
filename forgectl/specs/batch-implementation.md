@@ -19,7 +19,8 @@ Layers enforce a coarse ordering (all layer N items must be terminal before laye
 | Spec | Relationship |
 |------|-------------|
 | plan.json | Planning produces it; implementing consumes and mutates it (adding `passes` and `rounds` fields) |
-| Implementation evaluator prompt (`evaluators/impl-eval.md`) | Full instructions for the implementation evaluation sub-agent: what to check, report format, verdict rules |
+| Implementation evaluator prompt (`evaluators/impl-eval.md`, embedded in binary) | Full instructions for the implementation evaluation sub-agent: what to check, report format, verdict rules |
+| phase-transitions | DONE → PHASE_SHIFT when plans remain (implementing → planning when `plan_all_before_implementing: false`, implementing → implementing when `true`) |
 
 ---
 
@@ -32,7 +33,7 @@ Layers enforce a coarse ordering (all layer N items must be terminal before laye
 | State | Flags |
 |-------|-------|
 | IMPLEMENT | `--message <text>` (required first round only, when `enable_commits: true`) |
-| EVALUATE | `--verdict PASS\|FAIL`, `--eval-report <path>` (both required) |
+| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
 | COMMIT | `--message <text>` (required when `enable_commits: true`) |
 
 #### `eval` command
@@ -78,8 +79,8 @@ Steps:
   2. Define ServicesConfig struct with three named ServiceEndpoint fields
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
-Spec:    service-configuration.md#interface-outputs
-Ref:     notes/config.md#types
+Specs:   service-configuration.md#interface-outputs
+Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Implement this item.
          After completion of the above, advance to continue.
@@ -101,14 +102,15 @@ Steps:
   3. Add post-unmarshal validation for port range and empty host
   4. Write table-driven tests for valid, rejection, and edge cases
 Files:   internal/config/load.go, internal/config/load_test.go
-Spec:    service-configuration.md#behavior-loading
-Ref:     notes/config.md#load
+Specs:   service-configuration.md#behavior-loading
+         config-validation.md#behavior-strict-mode
+Refs:    notes/config.md#load
 Tests:   2 functional, 2 rejection, 2 edge_case
 Action:  Implement this item.
          After completion of the above, advance to continue.
 ```
 
-**Entering IMPLEMENT** (first item in batch, after eval — round 2+):
+**Entering IMPLEMENT** (first item in batch, after eval — round 2+, `enable_eval_output: true`):
 
 ```
 State:   IMPLEMENT
@@ -126,16 +128,44 @@ Steps:
   2. Define ServicesConfig struct with three named ServiceEndpoint fields
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
-Spec:    service-configuration.md#interface-outputs
-Ref:     notes/config.md#types
+Specs:   service-configuration.md#interface-outputs
+Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Study the eval file "launcher/.forge_workspace/implementation_plan/evals/batch-1-round-1.md"
-         and implement any corrections as needed. If none found during the eval,
-         please verify and look for corrections. Apply them.
+         and implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
          After completion of the above, advance to continue.
 ```
 
-**Entering EVALUATE** (implementing phase):
+**Entering IMPLEMENT** (first item in batch, after eval — round 2+, `enable_eval_output: false`):
+
+```
+State:   IMPLEMENT
+Phase:   implementing
+Layer:   L0 Foundation
+Batch:   1/2
+Round:   1/3
+Note:    PASS recorded for round 1. Minimum rounds not yet met (1/2).
+Item:    [config.types] ServiceEndpoint and ServicesConfig structs
+         Go structs for validated service endpoint configuration.
+         (1 of 2 in batch)
+Steps:
+  1. Define ServiceEndpoint struct with Host (string) and Port (int) fields
+  2. Define ServicesConfig struct with three named ServiceEndpoint fields
+  3. Add YAML struct tags for deserialization
+Files:   internal/config/types.go
+Specs:   service-configuration.md#interface-outputs
+Refs:    notes/config.md#types
+Tests:   1 functional
+Action:  Make corrections based off communication with the evaluator.
+         Implement any corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         After completion of the above, advance to continue.
+```
+
+**Entering EVALUATE** (implementing phase, `enable_eval_output: true`):
 
 ```
 State:    EVALUATE
@@ -151,7 +181,23 @@ Action:   Please spawn 1 opus sub-agent to evaluate the implementation batch.
           After completion of the above, advance with --eval-report <path> --verdict PASS|FAIL
 ```
 
-**Entering COMMIT** (after EVALUATE, batch terminal):
+**Entering EVALUATE** (implementing phase, `enable_eval_output: false`):
+
+```
+State:    EVALUATE
+Phase:    implementing
+Layer:    L0 Foundation
+Batch:    1/2
+Round:    1/3
+Items:
+  - [config.types] ServiceEndpoint and ServicesConfig structs
+  - [config.load] Load YAML, apply defaults, validate strictly
+Action:   Please spawn 1 opus sub-agent to evaluate the implementation batch.
+          The sub-agent should run: forgectl eval
+          After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering COMMIT** (after EVALUATE, batch terminal, `enable_commits: true`):
 
 ```
 State:   COMMIT
@@ -161,11 +207,23 @@ Batch:   1/2
 Items:
   - [config.types] passed
   - [config.load] passed
-Action:  Commit your changes before continuing.
-         After completion of the above, advance to continue.
+Action:  Advance with --message "your commit message" to commit and continue.
 ```
 
-**Entering COMMIT** (after force-accept):
+**Entering COMMIT** (after EVALUATE, batch terminal, `enable_commits: false`):
+
+```
+State:   COMMIT
+Phase:   implementing
+Layer:   L0 Foundation
+Batch:   1/2
+Items:
+  - [config.types] passed
+  - [config.load] passed
+Action:  Advance to continue.
+```
+
+**Entering COMMIT** (after force-accept, `enable_commits: true`):
 
 ```
 State:   COMMIT
@@ -175,8 +233,20 @@ Batch:   3/3
 Items:
   - [daemon.types] failed (force-accept, 3/3 rounds)
   - [daemon.io] failed (force-accept, 3/3 rounds)
-Action:  Commit your changes before continuing.
-         After completion of the above, advance to continue.
+Action:  Advance with --message "your commit message" to commit and continue.
+```
+
+**Entering COMMIT** (after force-accept, `enable_commits: false`):
+
+```
+State:   COMMIT
+Phase:   implementing
+Layer:   L1 Core
+Batch:   3/3
+Items:
+  - [daemon.types] failed (force-accept, 3/3 rounds)
+  - [daemon.io] failed (force-accept, 3/3 rounds)
+Action:  Advance to continue.
 ```
 
 **Entering ORIENT** (after COMMIT, more items in layer):
@@ -185,20 +255,33 @@ Action:  Commit your changes before continuing.
 State:    ORIENT
 Phase:    implementing
 Layer:    L0 Foundation
-Progress: 2/3 items passed
+Progress: 2/4 items passed
+Next:     2 unblocked items in next batch
 Action:   STOP please review and discuss with user before continuing.
           After completion of the above, advance to select next batch.
 ```
 
-**Entering ORIENT** (after COMMIT, layer complete):
+**Entering ORIENT** (after COMMIT, layer complete, more layers):
 
 ```
 State:    ORIENT
 Phase:    implementing
 Layer:    L0 Foundation
 Progress: 3/3 items passed — layer complete
+Next:     L1 Core — 2 items: [daemon.types], [daemon.io]
 Action:   STOP please review and discuss with user before continuing.
           After completion of the above, advance to next layer.
+```
+
+**Entering ORIENT** (after COMMIT, layer complete, last layer):
+
+```
+State:    ORIENT
+Phase:    implementing
+Layer:    L1 Core
+Progress: 2/2 items passed — layer complete (final layer)
+Action:   STOP please review and discuss with user before continuing.
+          After completion of the above, advance to continue.
 ```
 
 **Entering ORIENT** (force-accept):
@@ -214,20 +297,35 @@ Progress: 2/2 items terminal (0 passed, 2 failed) — layer complete
 Action:   After completion of the above, advance to next layer.
 ```
 
-**DONE** (all items complete, terminal state):
+**DONE** (all items complete, more plans remaining):
 
 ```
 State:   DONE
 Phase:   implementing
+Domain:  launcher
 Summary:
   L0 Foundation:  3/3 passed
   L1 Core:        2/2 passed
   Total:          5/5 items passed
   Eval rounds:    7 across 3 batches
+Action:  Domain complete. Advance to continue to next domain.
+```
+
+**DONE** (all items complete, no plans remaining — session complete):
+
+```
+State:   DONE
+Phase:   implementing
+Summary:
+  launcher:  5/5 items passed (3 batches)
+  portal:    3/3 items passed (2 batches)
+  Total:     8/8 items passed
 Action:  All items complete. Session done.
 ```
 
 #### `eval` output
+
+When `enable_eval_output: true`:
 
 ```
 === IMPLEMENTATION EVALUATION ROUND 1/3 ===
@@ -242,8 +340,8 @@ Batch: 1/2
 
 [1] config.types — ServiceEndpoint and ServicesConfig structs
     Description: Go structs for validated service endpoint configuration.
-    Spec:        service-configuration.md#interface-outputs
-    Ref:         notes/config.md#types
+    Specs:       service-configuration.md#interface-outputs
+    Refs:        notes/config.md#types
     Files:       internal/config/types.go
     Steps:
       1. Define ServiceEndpoint struct with Host (string) and Port (int) fields
@@ -254,8 +352,9 @@ Batch: 1/2
 
 [2] config.load — Load YAML, apply defaults, validate strictly
     Description: Parse spectacular.yml, apply default host/port values.
-    Spec:        service-configuration.md#behavior-loading
-    Ref:         notes/config.md#load
+    Specs:       service-configuration.md#behavior-loading
+                  config-validation.md#behavior-strict-mode
+    Refs:        notes/config.md#load
     Files:       internal/config/load.go, internal/config/load_test.go
     Steps:
       1. Implement LoadConfig() using goccy/go-yaml strict mode
@@ -277,7 +376,7 @@ Write your evaluation report to:
   launcher/.forge_workspace/implementation_plan/evals/batch-1-round-1.md
 ```
 
-Subsequent rounds include previous evaluations:
+Subsequent rounds with `enable_eval_output: true` include previous evaluations:
 
 ```
 === IMPLEMENTATION EVALUATION ROUND 2/3 ===
@@ -291,6 +390,37 @@ Round 1: PASS — launcher/.forge_workspace/implementation_plan/evals/batch-1-ro
 
 Write your evaluation report to:
   launcher/.forge_workspace/implementation_plan/evals/batch-1-round-2.md
+```
+
+When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives item details and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
+
+```
+=== IMPLEMENTATION EVALUATION ROUND 1/3 ===
+Layer: L0 Foundation
+Batch: 1/2
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/impl-eval.md>
+
+--- ITEMS TO EVALUATE ---
+
+[1] config.types — ServiceEndpoint and ServicesConfig structs
+    ...
+
+[2] config.load — Load YAML, apply defaults, validate strictly
+    ...
+```
+
+Subsequent rounds with `enable_eval_output: false`:
+
+```
+=== IMPLEMENTATION EVALUATION ROUND 2/3 ===
+...
+
+--- PREVIOUS EVALUATIONS ---
+
+Round 1: PASS
 ```
 
 #### Eval Report Locations
@@ -317,19 +447,35 @@ Progress: 3/5 passed, 0 failed, 2 remaining
 
 #### `status --verbose` output — Implementing section
 
-With `--verbose`, the full layer-by-item breakdown is appended:
+With `--verbose`, the full layer-by-item breakdown is appended, including spec and file references:
 
 ```
 --- Implementing ---
 
   Layer L0 (Foundation): complete
     [bootstrap]     passed  (1 round)
+      Specs: service-configuration.md#behavior-bootstrap
+      Refs:  notes/config.md#bootstrap
+      Files: internal/config/bootstrap.go
     [config.types]  passed  (1 round)
+      Specs: service-configuration.md#interface-outputs
+      Refs:  notes/config.md#types
+      Files: internal/config/types.go
     [config.load]   passed  (2 rounds)
+      Specs: service-configuration.md#behavior-loading
+             config-validation.md#behavior-strict-mode
+      Refs:  notes/config.md#load
+      Files: internal/config/load.go, internal/config/load_test.go
 
   Layer L1 (Core): in progress
     [daemon.types]  done    (0 rounds)
+      Specs: daemon-lifecycle.md#behavior-types
+      Refs:  notes/daemon.md#types
+      Files: internal/daemon/types.go
     [daemon.io]     pending (0 rounds)
+      Specs: daemon-lifecycle.md#behavior-io
+      Refs:  notes/daemon.md#io
+      Files: internal/daemon/io.go, internal/daemon/io_test.go
 ```
 
 ### Rejection
@@ -339,8 +485,9 @@ With `--verbose`, the full layer-by-item breakdown is appended:
 | `advance` in implementing IMPLEMENT (first round) without `--message` when `enable_commits: true` | Error. Exit code 1. | First-round items need a commit message when commits are enabled |
 | `advance` in implementing COMMIT without `--message` when `enable_commits: true` | Error. Exit code 1. | Batch completion needs a commit message when commits are enabled |
 | `advance` in implementing EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in implementing EVALUATE without `--eval-report` | Error. Exit code 1. | Every evaluation must reference its report |
+| `advance` in implementing EVALUATE without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
+| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
 | `eval` outside of implementing EVALUATE | Error naming current state and phase. Exit code 1. | Eval context only available in EVALUATE |
 
 ---
@@ -394,7 +541,9 @@ ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
 | EVALUATE | FAIL, rounds >= `implementing.eval.max_rounds` | COMMIT | Mark items `failed`. Record eval. Force-accept. |
 | COMMIT | more batches or layers | ORIENT | — |
 | COMMIT | all layers complete | DONE | — |
-| DONE | — | Error: "session complete." | Terminal state. |
+| DONE | `plan_all_before_implementing: false`, planning queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → planning). Return to planning for next domain. |
+| DONE | `plan_all_before_implementing: true`, implementing plan queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → implementing, domain boundary). Pull next plan. |
+| DONE | no plans remaining | _(terminal)_ | Session complete. |
 
 ### Item `passes` Transitions
 
@@ -408,19 +557,19 @@ ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
 
 ### IMPLEMENT Behavior
 
-Presents **one item at a time**. Displays full context: name, description, steps, files, spec, ref, test summary.
+Presents **one item at a time**. Displays full context: name, description, steps, files, specs, refs, test summary.
 
 **First round (no prior eval):** Action says "Implement this item." Advance requires `--message` — the scaffold commits after each item.
 
-**Subsequent rounds (after eval):** Action says "Study the eval file and implement any corrections." No `--message` required — corrections are committed at the COMMIT state after the batch passes.
+**Subsequent rounds (after eval):** When `enable_eval_output: true`, action says "Study the eval file and implement any corrections." When `enable_eval_output: false`, action says "Make corrections based off communication with the evaluator." No `--message` required — corrections are committed at the COMMIT state after the batch passes.
 
 ### EVALUATE Behavior
 
 Two actors:
 
-**Sub-agent** runs `forgectl eval` to receive full item details, evaluator prompt, report target path, and previous eval history.
+**Sub-agent** runs `forgectl eval` to receive full item details, evaluator prompt, and (when `enable_eval_output: true`) report target path and previous eval history.
 
-**Engineer** reviews the report, runs `forgectl advance --eval-report <path> --verdict PASS|FAIL`.
+**Engineer** reviews the report (or sub-agent's verbal verdict when `enable_eval_output: false`), runs `forgectl advance --verdict PASS|FAIL` (with `--eval-report <path>` when `enable_eval_output: true`).
 
 ### COMMIT State
 
@@ -430,7 +579,7 @@ Appears after:
 - EVALUATE with PASS + sufficient rounds
 - EVALUATE with FAIL at max_rounds (force-accept)
 
-The engineer commits changes, then runs `forgectl advance --message <commit msg>` to proceed.
+When `enable_commits` is `true`, the engineer runs `forgectl advance --message <commit msg>` to commit and proceed. When `false`, the engineer runs `forgectl advance` to proceed.
 
 ---
 
@@ -444,11 +593,11 @@ The engineer commits changes, then runs `forgectl advance --message <commit msg>
 6. **COMMIT precedes progression.** Every batch boundary passes through COMMIT before ORIENT/DONE.
 7. **First-round commits.** When `enable_commits` is `true`, IMPLEMENT advance requires `--message` and commits on the first round only. When `enable_commits` is `false`, `--message` is not required at IMPLEMENT or COMMIT.
 8. **Two actors, two commands.** Engineer uses `advance`; sub-agent uses `eval`.
-9. **Scaffold does not parse eval files.** Verdict provided via `--verdict`; file stored as path reference.
+9. **Scaffold does not parse eval files.** Verdict provided via `--verdict`; when `enable_eval_output: true`, file path stored as reference. When `false`, no file path is stored.
 10. **Min rounds enforced.** PASS below `implementing.eval.min_rounds` forces another implementation cycle.
 11. **Max rounds enforced.** FAIL at `implementing.eval.max_rounds` forces acceptance.
 12. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
-13. **Commit gating.** `--message` is only required when `enable_commits` is `true`. TODO: automatic `git commit` not yet implemented.
+13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold stages files per `implementing.commit_strategy` (default: `scoped`) and runs `git commit -m <message>`. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
 
 ---
 
@@ -474,9 +623,17 @@ The engineer commits changes, then runs `forgectl advance --message <commit msg>
   - **Expected:** Still unblocked — `failed` is terminal.
   - **Rationale:** `failed` is a terminal state just like `passed`. Dependent items proceed regardless of whether dependencies passed or failed.
 
-- **Scenario:** All layers complete.
-  - **Expected:** COMMIT → DONE.
-  - **Rationale:** DONE is the terminal state; no more batches or layers to process.
+- **Scenario:** All layers complete, no plans remaining.
+  - **Expected:** COMMIT → DONE. Session complete.
+  - **Rationale:** DONE with no remaining plans is the terminal state.
+
+- **Scenario:** All layers complete, `plan_all_before_implementing: false`, planning queue has plans remaining.
+  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → planning).
+  - **Rationale:** Interleaved mode returns to planning for the next domain.
+
+- **Scenario:** All layers complete, `plan_all_before_implementing: true`, implementing plan queue has plans remaining.
+  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → implementing, next domain).
+  - **Rationale:** All-planning-first mode continues implementing the next domain's plan.
 
 - **Scenario:** `eval` called outside EVALUATE.
   - **Expected:** Error.
@@ -554,20 +711,38 @@ The engineer commits changes, then runs `forgectl advance --message <commit msg>
 
 ### Implementing eval command outputs item details
 - **Verifies:** Eval command assembles full evaluation context.
-- **Given:** EVALUATE (implementing), batch has 2 items.
+- **Given:** EVALUATE (implementing), batch has 2 items, `enable_eval_output: true`.
 - **When:** `forgectl eval`
-- **Then:** Output includes impl-eval.md contents, item details, report target.
+- **Then:** Output includes impl-eval.md contents, item details, report target path.
+
+### Implementing eval command omits report target when eval output disabled
+- **Verifies:** No report path when eval output disabled.
+- **Given:** EVALUATE (implementing), batch has 2 items, `enable_eval_output: false`.
+- **When:** `forgectl eval`
+- **Then:** Output includes impl-eval.md contents, item details. No report target path.
 
 ### Failed items don't block dependents
 - **Verifies:** Failed items are terminal for dependency resolution.
 - **Given:** Item A `failed`, item B depends on A.
 - **Then:** B is unblocked.
 
-### DONE cannot advance
-- **Verifies:** Terminal state rejects further advancement.
-- **Given:** DONE.
+### DONE with no plans remaining is terminal
+- **Verifies:** Terminal state when all plans implemented.
+- **Given:** DONE, no plans remaining (neither planning queue nor implementing plan queue).
 - **When:** `advance`
-- **Then:** Error.
+- **Then:** Error: "session complete."
+
+### DONE transitions to planning when interleaved
+- **Verifies:** DONE returns to planning in interleaved mode.
+- **Given:** DONE, `plan_all_before_implementing: false`, planning queue has 1 plan.
+- **When:** `advance`
+- **Then:** PHASE_SHIFT entered. After advancing: `phase: "planning"`, `state: "ORIENT"`.
+
+### DONE transitions to next domain when all-planning-first
+- **Verifies:** DONE continues implementing next domain.
+- **Given:** DONE, `plan_all_before_implementing: true`, implementing plan queue has 1 plan.
+- **When:** `advance`
+- **Then:** PHASE_SHIFT entered. After advancing: `state: "ORIENT"`. Next plan loaded.
 
 ---
 

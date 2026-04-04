@@ -5,7 +5,7 @@
 
 ## Context
 
-Forgectl writes structured log entries to `~/.forgectl/logs/` in JSONL format. Each session gets its own log file, named with the domain, phase, and session UUID. Logging captures state-mutating commands — `init`, `advance`, `add-commit`, and `reconcile-commit` — so the user can reconstruct what happened during a session.
+Forgectl writes structured log entries to `~/.forgectl/logs/` in JSONL format. Each session gets its own log file, named with the domain, phase, and session UUID. Logging captures state-mutating commands — `init` and `advance` — so the user can reconstruct what happened during a session.
 
 Read-only commands (`status`, `eval`, `validate`, `--version`) do not produce log entries.
 
@@ -22,9 +22,9 @@ Log files accumulate over time. Pruning runs at `init` to clean up old files bas
 | session-init | Generates `session_id` (UUID v4), validates `[logs]` config, triggers pruning at init |
 | state-persistence | `session_id` field in state file root; log file name derived from session metadata |
 | spec-lifecycle | `advance` in specifying phase produces log entries with batch/domain context |
+| phase-transitions | `advance` in generate_planning_queue phase produces log entries with state context |
 | plan-production | `advance` in planning phase produces log entries with plan/round context |
 | batch-implementation | `advance` in implementing phase produces log entries with item/layer context |
-| commit-tracking | `add-commit` and `reconcile-commit` produce log entries |
 
 ---
 
@@ -67,8 +67,6 @@ Each line is a JSON object:
 {"ts":"2026-03-29T15:10:33Z","cmd":"advance","phase":"specifying","prev_state":"DRAFT","state":"EVALUATE","detail":{"round":1}}
 {"ts":"2026-03-29T15:12:01Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"REFINE","detail":{"round":1,"verdict":"FAIL","eval_report":"optimizer/specs/.eval/batch-1-r1.md"}}
 {"ts":"2026-03-29T15:30:00Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"ACCEPT","detail":{"round":2,"verdict":"PASS","forced":false}}
-{"ts":"2026-03-29T16:00:00Z","cmd":"add-commit","phase":"specifying","state":"DONE","detail":{"spec_id":1,"spec_name":"Repository Loading","hash":"7cede10"}}
-{"ts":"2026-03-29T16:01:00Z","cmd":"reconcile-commit","phase":"specifying","state":"DONE","detail":{"hash":"8743b1d","matched_specs":[{"id":2,"name":"Snapshot Diffing"},{"id":3,"name":"Cache Invalidation"}]}}
 ```
 
 #### Entry Fields
@@ -76,7 +74,7 @@ Each line is a JSON object:
 | Field | Type | Present | Description |
 |-------|------|---------|-------------|
 | `ts` | string (ISO 8601 UTC) | always | Timestamp of the command |
-| `cmd` | string | always | Command name: `init`, `advance`, `add-commit`, `reconcile-commit` |
+| `cmd` | string | always | Command name: `init`, `advance` |
 | `phase` | string | always | Current phase at time of command |
 | `prev_state` | string | `advance` only | State before the transition |
 | `state` | string | always | State after the command completes |
@@ -102,15 +100,6 @@ Each line is a JSON object:
 - `unblocked`: count of unblocked items (implementing ORIENT)
 - `remaining`: count of remaining items (implementing ORIENT)
 
-**`add-commit`:**
-- `spec_id`: spec ID
-- `spec_name`: spec display name
-- `hash`: commit hash
-
-**`reconcile-commit`:**
-- `hash`: commit hash
-- `matched_specs`: array of `{id, name}` objects for matched specs
-
 ### Rejection
 
 | Condition | Signal | Rationale |
@@ -131,7 +120,7 @@ At `init`, after the state file is created:
 3. Create the log file: `<phase>-<session_id_prefix>.jsonl`.
 4. Write the `init` log entry.
 
-For subsequent commands (`advance`, `add-commit`, `reconcile-commit`):
+For subsequent commands (`advance`):
 
 1. If `logs.enabled` is false: skip.
 2. Resolve the log file path from the session metadata in the state file.
@@ -199,13 +188,13 @@ If the log directory cannot be created, the log file cannot be opened, or a writ
   - **Expected:** Age-based deletion runs first, then count-based deletion on the remaining files.
   - **Rationale:** Both constraints are enforced. Whichever is more restrictive governs.
 
-- **Scenario:** Session spans three phases (specifying → planning → implementing).
+- **Scenario:** Session spans all phases (specifying → generate_planning_queue → planning → implementing).
   - **Expected:** Single log file for the entire session. File name uses the initial phase.
   - **Rationale:** One session = one log file. Phase shifts are logged as entries, not file boundaries.
 
 - **Scenario:** `add-queue-item` or `set-roots` command.
   - **Expected:** No log entry. These commands modify the state file but are not in the logged command set.
-  - **Rationale:** Only `init`, `advance`, `add-commit`, and `reconcile-commit` are logged. Minor state modifications are visible in the state file diff.
+  - **Rationale:** Only `init` and `advance` are logged. Minor state modifications are visible in the state file diff.
 
 ---
 
@@ -228,18 +217,6 @@ If the log directory cannot be created, the log file cannot be opened, or a writ
 - **Given:** Active session in EVALUATE state.
 - **When:** `forgectl advance --verdict FAIL --eval-report .eval/batch-1-r1.md`
 - **Then:** Log entry has `detail.verdict: "FAIL"`, `detail.eval_report: ".eval/batch-1-r1.md"`.
-
-### add-commit logged
-- **Verifies:** Commit registration logged.
-- **Given:** Active session with completed specs.
-- **When:** `forgectl add-commit --id 1 --hash 7cede10`
-- **Then:** Log entry with `cmd: "add-commit"`, `detail.spec_id: 1`, `detail.hash: "7cede10"`.
-
-### reconcile-commit logged
-- **Verifies:** Auto-commit registration logged.
-- **Given:** Active session with completed specs.
-- **When:** `forgectl reconcile-commit --hash 8743b1d`
-- **Then:** Log entry with `cmd: "reconcile-commit"`, `detail.hash: "8743b1d"`, `detail.matched_specs` populated.
 
 ### logging disabled skips everything
 - **Verifies:** No log file when disabled.
@@ -276,6 +253,6 @@ If the log directory cannot be created, the log file cannot be opened, or a writ
 ## Implements
 - JSONL activity logging to `~/.forgectl/logs/`
 - Per-session log files named with domain, phase, and session UUID prefix
-- Log entries for state-mutating commands: init, advance, add-commit, reconcile-commit
+- Log entries for state-mutating commands: init, advance
 - Configurable pruning at init: retention_days, max_files, enabled
 - Best-effort logging that never blocks primary workflow
