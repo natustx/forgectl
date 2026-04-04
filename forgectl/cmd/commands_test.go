@@ -356,6 +356,113 @@ func TestStatusVerboseImplementingShowsPerItemDetail(t *testing.T) {
 	}
 }
 
+// --- eval command tests ---
+
+// TestEvalCommandReconcileEvalOutputsReconciliationContext verifies that eval in
+// specifying RECONCILE_EVAL state outputs reconciliation context.
+func TestEvalCommandReconcileEvalOutputsReconciliationContext(t *testing.T) {
+	dir := t.TempDir()
+	s := &state.ForgeState{
+		Phase: state.PhaseSpecifying,
+		State: state.StateReconcileEval,
+		Config: state.ForgeConfig{
+			Specifying: state.SpecifyingConfig{
+				Reconciliation: state.ReconciliationConfig{MinRounds: 1, MaxRounds: 2},
+			},
+		},
+		Specifying: &state.SpecifyingState{
+			Reconcile: &state.ReconcileState{Round: 1},
+			Completed: []state.CompletedSpec{
+				{ID: 1, Name: "spec-a.md", Domain: "test", File: "test/specs/spec-a.md", RoundsTaken: 1},
+			},
+		},
+	}
+	state.Save(dir, s)
+
+	stateDir = dir
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runEval(evalCmd, nil); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "RECONCILIATION EVALUATION") {
+		t.Errorf("expected reconciliation context output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--- RECONCILIATION CONTEXT ---") {
+		t.Errorf("expected reconciliation context section, got:\n%s", output)
+	}
+}
+
+// TestEvalCommandCrossRefEvalOutputsCrossReferenceContext verifies that eval in
+// specifying CROSS_REFERENCE_EVAL state outputs cross-reference context.
+func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
+	dir := t.TempDir()
+	s := &state.ForgeState{
+		Phase: state.PhaseSpecifying,
+		State: state.StateCrossReferenceEval,
+		Config: state.ForgeConfig{
+			Specifying: state.SpecifyingConfig{
+				CrossReference: state.CrossRefConfig{MinRounds: 1, MaxRounds: 2},
+			},
+		},
+		Specifying: &state.SpecifyingState{
+			CrossReference: &state.CrossReferenceState{Domain: "test", Round: 1},
+			Completed: []state.CompletedSpec{
+				{ID: 1, Name: "spec-a.md", Domain: "test", File: "test/specs/spec-a.md", RoundsTaken: 1},
+			},
+		},
+	}
+	state.Save(dir, s)
+
+	stateDir = dir
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runEval(evalCmd, nil); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "CROSS-REFERENCE EVALUATION") {
+		t.Errorf("expected cross-reference context output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--- DOMAIN ---") {
+		t.Errorf("expected domain section in cross-reference eval output, got:\n%s", output)
+	}
+}
+
+// TestEvalCommandInDraftReturnsErrorNamingState verifies that eval in specifying
+// DRAFT state returns an error that names the current state.
+func TestEvalCommandInDraftReturnsErrorNamingState(t *testing.T) {
+	dir := t.TempDir()
+	s := &state.ForgeState{
+		Phase: state.PhaseSpecifying,
+		State: state.StateDraft,
+		Config: state.ForgeConfig{
+			Specifying: state.SpecifyingConfig{
+				Eval: state.EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
+		Specifying: state.NewSpecifyingState([]state.SpecQueueEntry{
+			{Name: "Spec A", Domain: "test", Topic: "t", File: "spec-a.md"},
+		}),
+	}
+	state.Save(dir, s)
+
+	stateDir = dir
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	err := runEval(evalCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when calling eval in DRAFT state")
+	}
+	if !strings.Contains(err.Error(), "DRAFT") {
+		t.Errorf("expected error to name current state 'DRAFT', got: %v", err)
+	}
+}
+
 // --- validate command tests ---
 
 func writeValidSpecQueueFile(t *testing.T, dir string) string {
