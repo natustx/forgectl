@@ -3,9 +3,10 @@ package state
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"forgectl/evaluators"
 )
 
 // phaseEvalConfig returns (batch, minRounds, maxRounds) for the current phase.
@@ -28,6 +29,8 @@ func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 	switch s.Phase {
 	case PhaseSpecifying:
 		printSpecifyingOutput(w, s)
+	case PhaseGeneratePlanningQueue:
+		printGeneratePlanningQueueOutput(w, s)
 	case PhasePlanning:
 		printPlanningOutput(w, s, dir)
 	case PhaseImplementing:
@@ -87,9 +90,13 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "File:    %s\n", cs.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Action:  Spawn evaluation sub-agent against the spec.\n")
-		fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
-		fmt.Fprintf(w, "         Advance with --verdict PASS --eval-report <path> --message <commit msg>\n")
-		fmt.Fprintf(w, "           or --verdict FAIL --eval-report <path>\n")
+		if s.Config.General.EnableEvalOutput {
+			fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
+			fmt.Fprintf(w, "         Advance with --verdict PASS --eval-report <path> --message <commit msg>\n")
+			fmt.Fprintf(w, "           or --verdict FAIL --eval-report <path>\n")
+		} else {
+			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL\n")
+		}
 
 	case StateRefine:
 		evalDir := filepath.Dir(cs.File)
@@ -103,9 +110,19 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cs.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
-		fmt.Fprintf(w, "Action:  Read the eval report and address any findings in the spec file.\n")
-		fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
-		fmt.Fprintf(w, "         When changes are complete, run: forgectl advance\n")
+		if s.Config.General.EnableEvalOutput {
+			fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
+			fmt.Fprintf(w, "         and implement any corrections as needed.\n")
+			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+			fmt.Fprintf(w, "         then apply corrections as needed.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
+			fmt.Fprintf(w, "         Implement any corrections as needed.\n")
+			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+			fmt.Fprintf(w, "         then apply corrections as needed.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		}
 
 	case StateAccept:
 		fmt.Fprintf(w, "State:   ACCEPT\n")
@@ -155,7 +172,38 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "State:   COMPLETE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Specs:   %d completed, reconciled\n", len(spec.Completed))
-		fmt.Fprintf(w, "Action:  Specifying phase complete. Advance to continue.\n")
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "Action:  Specifying phase complete.\n")
+			fmt.Fprintf(w, "         Advance with --message \"your commit message\" to commit and continue.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Specifying phase complete. Advance to continue.\n")
+		}
+	}
+}
+
+// --- Generate Planning Queue ---
+
+func printGeneratePlanningQueueOutput(w io.Writer, s *ForgeState) {
+	switch s.State {
+	case StateOrient:
+		planQueueFile := ""
+		if s.GeneratePlanningQueue != nil {
+			planQueueFile = s.GeneratePlanningQueue.PlanQueueFile
+		}
+		fmt.Fprintf(w, "State:   ORIENT\n")
+		fmt.Fprintf(w, "Phase:   generate_planning_queue\n")
+		fmt.Fprintf(w, "\nGenerated: %s\n", planQueueFile)
+		fmt.Fprintf(w, "\nAdvance to continue.\n")
+
+	case StateRefine:
+		planQueueFile := ""
+		if s.GeneratePlanningQueue != nil {
+			planQueueFile = s.GeneratePlanningQueue.PlanQueueFile
+		}
+		fmt.Fprintf(w, "State:   REFINE\n")
+		fmt.Fprintf(w, "Phase:   generate_planning_queue\n")
+		fmt.Fprintf(w, "\nStop and review the generated plan queue %s. Reorder and edit as needed.\n", planQueueFile)
+		fmt.Fprintf(w, "\nAdvance when ready.\n")
 	}
 }
 
@@ -192,8 +240,16 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Roots:   %s\n", strings.Join(cp.CodeSearchRoots, ", "))
+		for i, spec := range cp.Specs {
+			if i == 0 {
+				fmt.Fprintf(w, "Specs:   %s\n", spec)
+			} else {
+				fmt.Fprintf(w, "         %s\n", spec)
+			}
+		}
 		fmt.Fprintf(w, "Action:  Explore the codebase in relation to the specs under study.\n")
 		fmt.Fprintf(w, "         Sub-agents: 3. Search roots: %s.\n", strings.Join(cp.CodeSearchRoots, ", "))
+		fmt.Fprintf(w, "         Focus: find code relevant to the specs listed above.\n")
 		fmt.Fprintf(w, "         Advance when done.\n")
 
 	case StateStudyPackages:
@@ -239,6 +295,27 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Action:  Plan validation failed. Fix the plan and advance to re-validate.\n")
 		fmt.Fprintf(w, "         Format: PLAN_FORMAT.md\n")
 
+	case StateSelfReview:
+		notesDir := filepath.Join(filepath.Dir(cp.File), "notes") + "/"
+		fmt.Fprintf(w, "State:   SELF_REVIEW\n")
+		fmt.Fprintf(w, "Phase:   planning\n")
+		fmt.Fprintf(w, "Plan:    %s\n", cp.Name)
+		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
+		fmt.Fprintf(w, "File:    %s\n", cp.File)
+		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
+		for i, spec := range cp.Specs {
+			if i == 0 {
+				fmt.Fprintf(w, "Specs:   %s\n", spec)
+			} else {
+				fmt.Fprintf(w, "         %s\n", spec)
+			}
+		}
+		fmt.Fprintf(w, "Notes:   %s\n", notesDir)
+		fmt.Fprintf(w, "Action:  Review your plan against the specs and your study notes.\n")
+		fmt.Fprintf(w, "         Verify coverage, dependency ordering, and layer structure.\n")
+		fmt.Fprintf(w, "         Revise plan.json and notes as needed before evaluation.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+
 	case StateEvaluate:
 		fmt.Fprintf(w, "State:   EVALUATE\n")
 		fmt.Fprintf(w, "Phase:   planning\n")
@@ -248,7 +325,11 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		fmt.Fprintf(w, "Action:  Run evaluation sub-agent against the plan (round %d/%d).\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		fmt.Fprintf(w, "         Sub-agent: forgectl eval\n")
-		fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL --eval-report <path>.\n")
+		if s.Config.General.EnableEvalOutput {
+			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL --eval-report <path>.\n")
+		} else {
+			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL.\n")
+		}
 
 	case StateRefine:
 		evalDir := filepath.Join(filepath.Dir(cp.File), "evals")
@@ -261,13 +342,24 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		if lastEval.Verdict == "FAIL" {
-			fmt.Fprintf(w, "Action:  Evaluation found deficiencies. Spawn a sub-agent to update the plan and notes.\n")
+		if s.Config.General.EnableEvalOutput {
+			if lastEval.Verdict == "FAIL" {
+				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
+				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
+			} else {
+				fmt.Fprintf(w, "Action:  Minimum evaluation rounds not met. Spawn a sub-agent to re-evaluate the plan.\n")
+				fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
+			}
+			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+			fmt.Fprintf(w, "         then apply corrections as needed.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		} else {
-			fmt.Fprintf(w, "Action:  Minimum evaluation rounds not met. Spawn a sub-agent to re-evaluate the plan.\n")
+			fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
+			fmt.Fprintf(w, "         Implement any corrections as needed.\n")
+			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+			fmt.Fprintf(w, "         then apply corrections as needed.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		}
-		fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
-		fmt.Fprintf(w, "         Advance when plan is updated.\n")
 
 	case StateAccept:
 		fmt.Fprintf(w, "State:   ACCEPT\n")
@@ -277,12 +369,20 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		lastEval := plan.Evals[len(plan.Evals)-1]
-		if lastEval.Verdict == "FAIL" && plan.Round >= s.Config.Planning.Eval.MaxRounds {
-			fmt.Fprintf(w, "Action:  Plan accepted (max rounds reached).\n")
+		maxReached := lastEval.Verdict == "FAIL" && plan.Round >= s.Config.Planning.Eval.MaxRounds
+		if s.Config.General.EnableCommits {
+			if maxReached {
+				fmt.Fprintf(w, "Action:  Plan accepted (max rounds reached). Advance with --message \"your commit message\" to commit and continue.\n")
+			} else {
+				fmt.Fprintf(w, "Action:  Plan accepted. Advance with --message \"your commit message\" to commit and continue.\n")
+			}
 		} else {
-			fmt.Fprintf(w, "Action:  Plan accepted.\n")
+			if maxReached {
+				fmt.Fprintf(w, "Action:  Plan accepted (max rounds reached). Advance to continue.\n")
+			} else {
+				fmt.Fprintf(w, "Action:  Plan accepted. Advance to continue.\n")
+			}
 		}
-		fmt.Fprintf(w, "         Run: forgectl advance --message <commit msg>\n")
 	}
 }
 
@@ -367,7 +467,19 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 				}
 				layerComplete := terminal == total
 				if layerComplete {
-					fmt.Fprintf(w, " — layer complete")
+					// Check if this is the final layer.
+					isFinalLayer := false
+					for i, l := range plan.Layers {
+						if l.ID == impl.CurrentLayer.ID && i == len(plan.Layers)-1 {
+							isFinalLayer = true
+							break
+						}
+					}
+					if isFinalLayer {
+						fmt.Fprintf(w, " — layer complete (final layer)")
+					} else {
+						fmt.Fprintf(w, " — layer complete")
+					}
 				}
 				fmt.Fprintln(w)
 			}
@@ -383,17 +495,65 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		} else {
 			// Non-initial orient uses wider alignment (matching State:    ).
-			actionText := "Selecting next batch. Run: forgectl advance"
 			layerDef := findLayer(plan, impl.CurrentLayer.ID)
-			if layerDef != nil && allLayerItemsTerminal(plan, *layerDef) {
-				actionText = "Advancing to next layer. Run: forgectl advance"
+			layerComplete := layerDef != nil && allLayerItemsTerminal(plan, *layerDef)
+
+			// Determine Next: line.
+			if layerComplete {
+				// Find the next layer.
+				nextLayer := (*PlanLayerDef)(nil)
+				for i, l := range plan.Layers {
+					if l.ID == impl.CurrentLayer.ID && i+1 < len(plan.Layers) {
+						nextLayer = &plan.Layers[i+1]
+						break
+					}
+				}
+				if nextLayer != nil {
+					var ids []string
+					for _, id := range nextLayer.Items {
+						ids = append(ids, fmt.Sprintf("[%s]", id))
+					}
+					fmt.Fprintf(w, "Next:     %s %s — %d items: %s\n", nextLayer.ID, nextLayer.Name, len(nextLayer.Items), strings.Join(ids, ", "))
+				}
+			} else if layerDef != nil {
+				// Count pending items in current layer for next batch.
+				pending := 0
+				for _, id := range layerDef.Items {
+					item := findItem(plan, id)
+					if item != nil && item.Passes == "pending" {
+						pending++
+					}
+				}
+				nextBatchSize := pending
+				if nextBatchSize > s.Config.Implementing.Batch {
+					nextBatchSize = s.Config.Implementing.Batch
+				}
+				if nextBatchSize > 0 {
+					fmt.Fprintf(w, "Next:     %d unblocked items in next batch\n", nextBatchSize)
+				}
 			}
-			if s.Config.General.UserGuided {
-				fmt.Fprintf(w, "Action:   Stop and review and discuss with user before continuing.\n")
-				fmt.Fprintf(w, "          %s\n", actionText)
+
+			// Determine action text.
+			var actionContinue string
+			if layerComplete {
+				nextExists := false
+				for i, l := range plan.Layers {
+					if l.ID == impl.CurrentLayer.ID && i+1 < len(plan.Layers) {
+						nextExists = true
+						break
+					}
+				}
+				if nextExists {
+					actionContinue = "advance to next layer."
+				} else {
+					actionContinue = "advance to continue."
+				}
 			} else {
-				fmt.Fprintf(w, "Action:   %s\n", actionText)
+				actionContinue = "advance to select next batch."
 			}
+
+			fmt.Fprintf(w, "Action:   STOP please review and discuss with user before continuing.\n")
+			fmt.Fprintf(w, "          After completion of the above, %s\n", actionContinue)
 		}
 
 	case StateImplement:
@@ -421,7 +581,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Round:   %d/%d\n", batch.EvalRound, s.Config.Implementing.Eval.MaxRounds)
 			if len(batch.Evals) > 0 {
 				lastEval := batch.Evals[len(batch.Evals)-1]
-				evalDir := filepath.Join(filepath.Dir(s.Planning.CurrentPlan.File), "evals")
+				evalDir := filepath.Join(currentPlanDir(s), "evals")
 				evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
 				fmt.Fprintf(w, "Eval:    %s\n", evalFile)
 				note := fmt.Sprintf("%s recorded for round %d.", lastEval.Verdict, lastEval.Round)
@@ -446,10 +606,22 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Files:   %s\n", strings.Join(item.Files, ", "))
 		}
 		if len(item.Specs) > 0 {
-			fmt.Fprintf(w, "Spec:    %s\n", strings.Join(item.Specs, ", "))
+			for i, spec := range item.Specs {
+				if i == 0 {
+					fmt.Fprintf(w, "Specs:   %s\n", spec)
+				} else {
+					fmt.Fprintf(w, "         %s\n", spec)
+				}
+			}
 		}
 		if len(item.Refs) > 0 {
-			fmt.Fprintf(w, "Ref:     %s\n", strings.Join(item.Refs, ", "))
+			for i, ref := range item.Refs {
+				if i == 0 {
+					fmt.Fprintf(w, "Refs:    %s\n", ref)
+				} else {
+					fmt.Fprintf(w, "         %s\n", ref)
+				}
+			}
 		}
 
 		// Test summary.
@@ -468,13 +640,23 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		}
 
 		if batch.EvalRound > 0 {
-			evalDir := filepath.Join(filepath.Dir(s.Planning.CurrentPlan.File), "evals")
+			planDir := currentPlanDir(s)
+			evalDir := filepath.Join(planDir, "evals")
 			lastEval := batch.Evals[len(batch.Evals)-1]
 			evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
-			fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
-			fmt.Fprintf(w, "         and implement any corrections as needed. If none found during the eval,\n")
-			fmt.Fprintf(w, "         please verify and look for corrections. Apply them.\n")
-			fmt.Fprintf(w, "         When complete, run: forgectl advance\n")
+			if s.Config.General.EnableEvalOutput {
+				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
+				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
+				fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+				fmt.Fprintf(w, "         then apply corrections as needed.\n")
+				fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+			} else {
+				fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
+				fmt.Fprintf(w, "         Implement any corrections as needed.\n")
+				fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
+				fmt.Fprintf(w, "         then apply corrections as needed.\n")
+				fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+			}
 		} else {
 			fmt.Fprintf(w, "Action:  Implement this item.\n")
 			fmt.Fprintf(w, "         When complete, run: forgectl advance --message <commit msg>\n")
@@ -506,8 +688,11 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Action:   Ask the evaluation sub-agent to verify batch items against their tests.\n")
 		fmt.Fprintf(w, "          The sub-agent should run: forgectl eval\n")
 		fmt.Fprintf(w, "          After reviewing the eval report, run:\n")
-		fmt.Fprintf(w, "            forgectl advance --eval-report <path> --verdict PASS|FAIL\n")
-		fmt.Fprintf(w, "Sub-agent: forgectl eval\n")
+		if s.Config.General.EnableEvalOutput {
+			fmt.Fprintf(w, "            forgectl advance --eval-report <path> --verdict PASS|FAIL\n")
+		} else {
+			fmt.Fprintf(w, "            forgectl advance --verdict PASS|FAIL\n")
+		}
 
 	case StateCommit:
 		batch := impl.CurrentBatch
@@ -535,13 +720,25 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 
-		fmt.Fprintf(w, "Action:  Commit your changes before continuing.\n")
-		fmt.Fprintf(w, "         When ready, run: forgectl advance --message <commit msg>\n")
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "Action:  Advance with --message \"your commit message\" to commit and continue.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Advance to continue.\n")
+		}
 
 	case StateDone:
 		plan, _ := loadPlan(s, dir)
 		fmt.Fprintf(w, "State:   DONE\n")
 		fmt.Fprintf(w, "Phase:   implementing\n")
+
+		// Check if more domains remain.
+		moreDomains := (impl != nil && len(impl.PlanQueue) > 0) ||
+			(s.Planning != nil && len(s.Planning.Queue) > 0)
+
+		if moreDomains && impl != nil && impl.CurrentPlanDomain != "" {
+			fmt.Fprintf(w, "Domain:  %s\n", impl.CurrentPlanDomain)
+		}
+
 		fmt.Fprintf(w, "Summary:\n")
 		if plan != nil {
 			totalItems := 0
@@ -573,7 +770,12 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "  Total:          %d/%d items passed\n", totalPassed, totalItems)
 			fmt.Fprintf(w, "  Eval rounds:    %d across %d batches\n", totalRounds, totalBatches)
 		}
-		fmt.Fprintf(w, "Action:  All items complete. Session done.\n")
+
+		if moreDomains {
+			fmt.Fprintf(w, "Action:  Domain complete. Advance to continue to next domain.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  All items complete. Session done.\n")
+		}
 	}
 }
 
@@ -593,18 +795,26 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 		}
 	}
 
-	fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
-	if ps.From == PhaseSpecifying && ps.To == PhasePlanning {
-		fmt.Fprintf(w, "When ready, run: forgectl advance --from <plans-queue.json>\n")
-	} else {
+	switch {
+	case ps.From == PhaseSpecifying && ps.To == PhaseGeneratePlanningQueue:
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
+		fmt.Fprintf(w, "When ready:\n")
+		fmt.Fprintf(w, "  forgectl advance                            # generate plan queue from completed specs\n")
+		fmt.Fprintf(w, "  forgectl advance --from <plan-queue.json>   # OR provide a plan queue (skips generation)\n")
+	case ps.From == PhaseGeneratePlanningQueue && ps.To == PhasePlanning:
+		fmt.Fprintf(w, "\nAdvance to continue.\n")
+	default:
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
 		fmt.Fprintf(w, "When ready, run: forgectl advance\n")
 	}
 }
 
 // --- Status ---
 
-// PrintStatus prints the full session status.
-func PrintStatus(w io.Writer, s *ForgeState, dir string) {
+// PrintStatus prints the session status. When verbose is true, appends detailed
+// queue, completed, and implementing sections after the standard output.
+func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
+	// Header (always shown).
 	fmt.Fprintf(w, "Session: forgectl-state.json\n")
 	fmt.Fprintf(w, "Phase:   %s", s.Phase)
 	if s.StartedAtPhase != "" && s.StartedAtPhase == s.Phase && s.StartedAtPhase != PhaseSpecifying {
@@ -615,12 +825,16 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 	fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d, guided=%v\n", batch, min, max, s.Config.General.UserGuided)
 	fmt.Fprintln(w)
 
-	// Current state.
+	// Current state (always shown).
 	fmt.Fprintf(w, "--- Current ---\n\n")
 	PrintAdvanceOutput(w, s, dir)
 	fmt.Fprintln(w)
 
-	// Specifying section.
+	if !verbose {
+		return
+	}
+
+	// Verbose: Specifying section.
 	if s.Specifying != nil {
 		fmt.Fprintf(w, "--- Specifying ---\n\n")
 		spec := s.Specifying
@@ -665,7 +879,7 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintln(w)
 	}
 
-	// Planning section.
+	// Verbose: Planning section.
 	if s.Planning != nil {
 		fmt.Fprintf(w, "--- Planning ---\n\n")
 		plan := s.Planning
@@ -700,7 +914,7 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintln(w)
 	}
 
-	// Implementing section.
+	// Verbose: Implementing section.
 	if s.Implementing != nil {
 		fmt.Fprintf(w, "--- Implementing ---\n\n")
 		plan, _ := loadPlan(s, dir)
@@ -730,22 +944,11 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 
 // --- Eval command ---
 
-// evaluatorDir returns the directory containing the forgectl binary, which is
-// where the evaluators/ subdirectory lives. Falls back to the current working
-// directory if the executable path cannot be resolved.
-func evaluatorDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "."
-	}
-	return filepath.Dir(exe)
-}
-
 // PrintEvalOutput prints the evaluation context for the sub-agent.
 func PrintEvalOutput(w io.Writer, s *ForgeState, dir string) error {
 	switch s.Phase {
 	case PhasePlanning:
-		return printPlanningEval(w, s, dir)
+		return printPlanningEval(w, s)
 	case PhaseImplementing:
 		return printImplementingEval(w, s, dir)
 	default:
@@ -753,7 +956,7 @@ func PrintEvalOutput(w io.Writer, s *ForgeState, dir string) error {
 	}
 }
 
-func printPlanningEval(w io.Writer, s *ForgeState, dir string) error {
+func printPlanningEval(w io.Writer, s *ForgeState) error {
 	if s.State != StateEvaluate {
 		return fmt.Errorf("eval is only valid in EVALUATE state (current: %s)", s.State)
 	}
@@ -766,15 +969,8 @@ func printPlanningEval(w io.Writer, s *ForgeState, dir string) error {
 	fmt.Fprintf(w, "File:   %s\n", plan.CurrentPlan.File)
 
 	// Evaluator instructions.
-	evalPromptPath := filepath.Join(evaluatorDir(), "evaluators", "plan-eval.md")
-	evalPrompt, err := os.ReadFile(evalPromptPath)
-	if err != nil {
-		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
-		fmt.Fprintf(w, "(could not read %s: %s)\n", evalPromptPath, err)
-	} else {
-		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
-		fmt.Fprintf(w, "%s\n", string(evalPrompt))
-	}
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.PlanEval)
 
 	// Plan references.
 	fmt.Fprintf(w, "\n--- PLAN REFERENCES ---\n\n")
@@ -797,12 +993,13 @@ func printPlanningEval(w io.Writer, s *ForgeState, dir string) error {
 		}
 	}
 
-	// Report output.
-	evalDir := filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals")
-	reportFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
-	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-	fmt.Fprintf(w, "Write your evaluation report to:\n")
-	fmt.Fprintf(w, "  %s\n", reportFile)
+	if s.Config.General.EnableEvalOutput {
+		evalDir := filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals")
+		reportFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your evaluation report to:\n")
+		fmt.Fprintf(w, "  %s\n", reportFile)
+	}
 
 	return nil
 }
@@ -828,15 +1025,8 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 	fmt.Fprintf(w, "Batch: %d/%d\n", impl.BatchNumber, totalBatches)
 
 	// Evaluator instructions.
-	evalPromptPath := filepath.Join(evaluatorDir(), "evaluators", "impl-eval.md")
-	evalPrompt, err := os.ReadFile(evalPromptPath)
-	if err != nil {
-		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
-		fmt.Fprintf(w, "(could not read %s: %s)\n", evalPromptPath, err)
-	} else {
-		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
-		fmt.Fprintf(w, "%s\n", string(evalPrompt))
-	}
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.ImplEval)
 
 	// Items to evaluate.
 	fmt.Fprintf(w, "\n--- ITEMS TO EVALUATE ---\n\n")
@@ -853,10 +1043,22 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		fmt.Fprintf(w, "[%d] %s — %s\n", i+1, item.ID, item.Name)
 		fmt.Fprintf(w, "    Description: %s\n", item.Description)
 		if len(item.Specs) > 0 {
-			fmt.Fprintf(w, "    Spec:        %s\n", strings.Join(item.Specs, ", "))
+			for i, spec := range item.Specs {
+				if i == 0 {
+					fmt.Fprintf(w, "    Specs:       %s\n", spec)
+				} else {
+					fmt.Fprintf(w, "                 %s\n", spec)
+				}
+			}
 		}
 		if len(item.Refs) > 0 {
-			fmt.Fprintf(w, "    Ref:         %s\n", strings.Join(item.Refs, ", "))
+			for i, ref := range item.Refs {
+				if i == 0 {
+					fmt.Fprintf(w, "    Refs:        %s\n", ref)
+				} else {
+					fmt.Fprintf(w, "                 %s\n", ref)
+				}
+			}
 		}
 		if len(item.Files) > 0 {
 			fmt.Fprintf(w, "    Files:       %s\n", strings.Join(item.Files, ", "))
@@ -888,17 +1090,124 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		}
 	}
 
-	// Report output.
-	evalDir := filepath.Join(filepath.Dir(s.Planning.CurrentPlan.File), "evals")
-	reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
-	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-	fmt.Fprintf(w, "Write your evaluation report to:\n")
-	fmt.Fprintf(w, "  %s\n", reportFile)
+	if s.Config.General.EnableEvalOutput {
+		evalDir := filepath.Join(currentPlanDir(s), "evals")
+		reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your evaluation report to:\n")
+		fmt.Fprintf(w, "  %s\n", reportFile)
+	}
+
+	return nil
+}
+
+// PrintReconcileEvalOutput prints the reconciliation evaluation context for the sub-agent.
+// Valid in specifying RECONCILE_EVAL state.
+func PrintReconcileEvalOutput(w io.Writer, s *ForgeState) error {
+	if s.Phase != PhaseSpecifying || s.State != StateReconcileEval {
+		return fmt.Errorf("eval is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
+	}
+
+	spec := s.Specifying
+	round := 0
+	maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
+	if spec.Reconcile != nil {
+		round = spec.Reconcile.Round
+	}
+
+	fmt.Fprintf(w, "=== RECONCILIATION EVALUATION ROUND %d/%d ===\n", round, maxRounds)
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.ReconcileEval)
+
+	// Domain counts from completed specs.
+	domainCounts := map[string]int{}
+	var domainOrder []string
+	for _, c := range spec.Completed {
+		if _, seen := domainCounts[c.Domain]; !seen {
+			domainOrder = append(domainOrder, c.Domain)
+		}
+		domainCounts[c.Domain]++
+	}
+	fmt.Fprintf(w, "\n--- DOMAINS ---\n\n")
+	for _, d := range domainOrder {
+		fmt.Fprintf(w, "%s: %d specs\n", d, domainCounts[d])
+	}
+
+	fmt.Fprintf(w, "\n--- RECONCILIATION CONTEXT ---\n\n")
+	fmt.Fprintf(w, "Run: git diff --staged\n")
+
+	if s.Config.General.EnableEvalOutput && len(spec.Completed) > 0 {
+		specDir := filepath.Dir(spec.Completed[0].File)
+		reportFile := filepath.Join(specDir, ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your evaluation report to:\n")
+		fmt.Fprintf(w, "  %s\n", reportFile)
+	}
+
+	return nil
+}
+
+// PrintCrossRefEvalOutput prints the cross-reference evaluation context for the sub-agent.
+// Valid in specifying CROSS_REFERENCE_EVAL state.
+func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
+	if s.Phase != PhaseSpecifying || s.State != StateCrossReferenceEval {
+		return fmt.Errorf("eval is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
+	}
+
+	spec := s.Specifying
+	domain := ""
+	round := 0
+	maxRounds := s.Config.Specifying.CrossReference.MaxRounds
+	if spec.CrossReference != nil {
+		domain = spec.CrossReference.Domain
+		round = spec.CrossReference.Round
+	}
+
+	fmt.Fprintf(w, "=== CROSS-REFERENCE EVALUATION ROUND %d/%d ===\n", round, maxRounds)
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.CrossRefEval)
+
+	// Domain and its specs from completed.
+	var domainSpecs []CompletedSpec
+	for _, c := range spec.Completed {
+		if c.Domain == domain {
+			domainSpecs = append(domainSpecs, c)
+		}
+	}
+	fmt.Fprintf(w, "\n--- DOMAIN ---\n\n")
+	fmt.Fprintf(w, "%s: %d specs\n", domain, len(domainSpecs))
+
+	if len(domainSpecs) > 0 {
+		fmt.Fprintf(w, "\n--- SPECS ---\n\n")
+		for i, c := range domainSpecs {
+			fmt.Fprintf(w, "  [%d] %s\n", i+1, c.File)
+		}
+	}
+
+	if s.Config.General.EnableEvalOutput && len(domainSpecs) > 0 {
+		specDir := filepath.Dir(domainSpecs[0].File)
+		reportFile := filepath.Join(specDir, ".eval", fmt.Sprintf("cross-reference-r%d.md", round))
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your evaluation report to:\n")
+		fmt.Fprintf(w, "  %s\n", reportFile)
+	}
 
 	return nil
 }
 
 // --- Helpers ---
+
+// currentPlanDir returns the directory containing the active plan file.
+// Prefers Implementing.CurrentPlanFile over Planning.CurrentPlan.File.
+func currentPlanDir(s *ForgeState) string {
+	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
+		return filepath.Dir(s.Implementing.CurrentPlanFile)
+	}
+	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+		return filepath.Dir(s.Planning.CurrentPlan.File)
+	}
+	return "."
+}
 
 func findLayer(plan *PlanJSON, id string) *PlanLayerDef {
 	for i := range plan.Layers {

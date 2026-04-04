@@ -6,6 +6,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var statusVerbose bool
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Print current state with action guidance and session overview",
@@ -13,6 +15,7 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
+	statusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show full session overview")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -22,6 +25,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	state.PrintStatus(cmd.OutOrStdout(), s, stateDir)
+	state.PrintStatus(cmd.OutOrStdout(), s, stateDir, statusVerbose)
 	return nil
 }

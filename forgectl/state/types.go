@@ -22,9 +22,12 @@ const (
 	StateAccept          StateName = "ACCEPT"
 	StateDone            StateName = "DONE"
 	StateReconcile       StateName = "RECONCILE"
-	StateReconcileEval   StateName = "RECONCILE_EVAL"
-	StateReconcileReview StateName = "RECONCILE_REVIEW"
-	StateComplete        StateName = "COMPLETE"
+	StateReconcileEval          StateName = "RECONCILE_EVAL"
+	StateReconcileReview        StateName = "RECONCILE_REVIEW"
+	StateCrossReference         StateName = "CROSS_REFERENCE"
+	StateCrossReferenceEval     StateName = "CROSS_REFERENCE_EVAL"
+	StateCrossReferenceReview   StateName = "CROSS_REFERENCE_REVIEW"
+	StateComplete               StateName = "COMPLETE"
 	StatePhaseShift      StateName = "PHASE_SHIFT"
 	StateStudySpecs      StateName = "STUDY_SPECS"
 	StateStudyCode       StateName = "STUDY_CODE"
@@ -130,8 +133,9 @@ type LogsConfig struct {
 
 // GeneralConfig holds top-level behavioral flags.
 type GeneralConfig struct {
-	EnableCommits bool `json:"enable_commits"`
-	UserGuided    bool `json:"user_guided"`
+	EnableCommits   bool `json:"enable_commits"`
+	EnableEvalOutput bool `json:"enable_eval_output"`
+	UserGuided      bool `json:"user_guided"`
 }
 
 // ForgeConfig is the full project configuration loaded from .forgectl/config.
@@ -345,13 +349,21 @@ type ReconcileState struct {
 	Evals []EvalRecord `json:"evals,omitempty"`
 }
 
+// CrossReferenceState tracks per-domain cross-reference evaluation.
+type CrossReferenceState struct {
+	Domain string       `json:"domain"`
+	Round  int          `json:"round"`
+	Evals  []EvalRecord `json:"evals,omitempty"`
+}
+
 // SpecifyingState holds specifying phase data.
 type SpecifyingState struct {
-	CurrentSpec *ActiveSpec      `json:"current_spec"`
-	Queue       []SpecQueueEntry `json:"queue"`
-	Completed   []CompletedSpec  `json:"completed"`
-	Reconcile   *ReconcileState  `json:"reconcile,omitempty"`
-	DomainRoots map[string][]string `json:"domain_roots,omitempty"` // set-roots data used by genqueue
+	CurrentSpec    *ActiveSpec          `json:"current_spec"`
+	Queue          []SpecQueueEntry     `json:"queue"`
+	Completed      []CompletedSpec      `json:"completed"`
+	Reconcile      *ReconcileState      `json:"reconcile,omitempty"`
+	CrossReference *CrossReferenceState `json:"cross_reference,omitempty"`
+	DomainRoots    map[string][]string  `json:"domain_roots,omitempty"` // set-roots data used by genqueue
 }
 
 // --- Planning phase state ---
