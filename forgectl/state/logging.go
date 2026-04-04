@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,7 +17,7 @@ type LogEntry struct {
 	Phase     string         `json:"phase"`
 	PrevState string         `json:"prev_state,omitempty"`
 	State     string         `json:"state"`
-	Detail    map[string]any `json:"detail,omitempty"`
+	Detail    map[string]any `json:"detail"`
 }
 
 // LogDir returns the path to the forgectl log directory (~/.forgectl/logs/).
@@ -39,38 +40,47 @@ func LogFileName(phase, sessionID string) string {
 }
 
 // WriteLogEntry opens the log file in append mode and writes entry as a JSON line.
-// Best-effort: silently ignores all errors.
+// Best-effort: warns to stderr on failure but does not block the command.
 func WriteLogEntry(sessionID, startPhase string, entry LogEntry) {
 	if sessionID == "" {
 		return
 	}
+	if entry.Detail == nil {
+		entry.Detail = map[string]any{}
+	}
 
 	dir := LogDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot create log directory %s: %v\n", dir, err)
 		return
 	}
 
 	fname := filepath.Join(dir, LogFileName(string(startPhase), sessionID))
 	f, err := os.OpenFile(fname, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot open log file %s: %v\n", fname, err)
 		return
 	}
 	defer f.Close()
 
 	line, err := json.Marshal(entry)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot marshal log entry: %v\n", err)
 		return
 	}
 	line = append(line, '\n')
-	_, _ = f.Write(line)
+	if _, err := f.Write(line); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot write log entry: %v\n", err)
+	}
 }
 
 // PruneLogFiles removes .jsonl files from dir that are older than retentionDays days,
 // then removes the oldest files until at most maxFiles remain.
-// Best-effort: silently ignores all errors.
+// Best-effort: warns to stderr on failure but does not block the command.
 func PruneLogFiles(dir string, retentionDays int, maxFiles int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot read log directory %s: %v\n", dir, err)
 		return
 	}
 
