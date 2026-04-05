@@ -1264,34 +1264,203 @@ func (e *ValidationError) Error() string {
 
 // --- Reverse Engineering Phase ---
 
+// writeRELog writes an activity log entry for a reverse engineering state transition.
+// When s.Logger is nil this is a no-op.
+func writeRELog(s *ForgeState, prevState StateName, detail map[string]interface{}) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Write(LogEntry{
+		TS:        LogNow(),
+		Cmd:       "advance",
+		Phase:     string(PhaseReverseEngineering),
+		PrevState: string(prevState),
+		State:     string(s.State),
+		Detail:    detail,
+	})
+}
+
 func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error {
 	re := s.ReverseEngineering
 	if re == nil {
 		return fmt.Errorf("reverse engineering state is nil")
 	}
 
+	prevState := s.State
+
 	switch s.State {
 	case StateOrient:
 		re.CurrentDomain = 0
 		s.State = StateSurvey
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.CurrentDomain),
+			"domain_index":  re.CurrentDomain,
+			"total_domains": re.TotalDomains,
+		})
 
 	case StateSurvey:
 		s.State = StateGapAnalysis
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.CurrentDomain),
+			"domain_index":  re.CurrentDomain,
+			"total_domains": re.TotalDomains,
+		})
 
 	case StateGapAnalysis:
 		s.State = StateDecompose
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.CurrentDomain),
+			"domain_index":  re.CurrentDomain,
+			"total_domains": re.TotalDomains,
+		})
 
 	case StateDecompose:
 		s.State = StateQueue
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.CurrentDomain),
+			"domain_index":  re.CurrentDomain,
+			"total_domains": re.TotalDomains,
+		})
 
 	case StateQueue:
-		return advanceREFromQueue(s, re, in, dir)
+		if err := advanceREFromQueue(s, re, in, dir); err != nil {
+			return err
+		}
+		queueDetail := map[string]interface{}{
+			"domain":        reDomainName(re, re.CurrentDomain),
+			"domain_index":  re.CurrentDomain,
+			"total_domains": re.TotalDomains,
+		}
+		if re.QueueFile != "" {
+			queueDetail["queue_file"] = re.QueueFile
+		}
+		writeRELog(s, prevState, queueDetail)
+		return nil
 
 	case StateExecute:
-		return advanceREFromExecute(s, re, dir)
+		if err := advanceREFromExecute(s, re, dir); err != nil {
+			return err
+		}
+		execDetail := map[string]interface{}{
+			"domain_index":  0,
+			"total_domains": re.TotalDomains,
+			"mode":          s.Config.ReverseEngineering.Mode,
+		}
+		// Compute spec count from queue file.
+		if re.QueueFile != "" {
+			if data, err := os.ReadFile(re.QueueFile); err == nil {
+				var qi ReverseEngineeringQueueInput
+				if json.Unmarshal(data, &qi) == nil {
+					execDetail["spec_count"] = len(qi.Specs)
+				}
+			}
+		}
+		writeRELog(s, prevState, execDetail)
+		return nil
+
+	case StateReconcile:
+		s.State = StateReconcileEval
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":           reDomainName(re, re.ReconcileDomain),
+			"domain_index":     re.ReconcileDomain,
+			"total_domains":    re.TotalDomains,
+			"round":            re.Round,
+			"reconcile_domain": re.ReconcileDomain,
+		})
+
+	case StateReconcileEval:
+		if err := advanceREFromReconcileEval(s, re, in); err != nil {
+			return err
+		}
+		reconcileEvalDetail := map[string]interface{}{
+			"domain":           reDomainName(re, re.ReconcileDomain),
+			"domain_index":     re.ReconcileDomain,
+			"total_domains":    re.TotalDomains,
+			"round":            re.Round,
+			"reconcile_domain": re.ReconcileDomain,
+			"verdict":          in.Verdict,
+		}
+		writeRELog(s, prevState, reconcileEvalDetail)
+		return nil
+
+	case StateColleagueReview:
+		s.State = StateReconcileAdvance
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.ReconcileDomain),
+			"domain_index":  re.ReconcileDomain,
+			"total_domains": re.TotalDomains,
+		})
+
+	case StateReconcileAdvance:
+		if re.ReconcileDomain+1 < re.TotalDomains {
+			re.ReconcileDomain++
+			re.Round = 1
+			re.Evals = nil
+			s.State = StateReconcile
+		} else {
+			s.State = StateDone
+		}
+		writeRELog(s, prevState, map[string]interface{}{
+			"domain":        reDomainName(re, re.ReconcileDomain),
+			"domain_index":  re.ReconcileDomain,
+			"total_domains": re.TotalDomains,
+		})
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in reverse_engineering phase", s.State)
+	}
+
+	return nil
+}
+
+// reDomainName returns the domain name at the given index, or empty string if out of range.
+func reDomainName(re *ReverseEngineeringState, idx int) string {
+	if idx >= 0 && idx < len(re.Domains) {
+		return re.Domains[idx]
+	}
+	return ""
+}
+
+func advanceREFromReconcileEval(s *ForgeState, re *ReverseEngineeringState, in AdvanceInput) error {
+	if in.Verdict == "" {
+		return fmt.Errorf("--verdict is required in RECONCILE_EVAL state")
+	}
+	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+		return fmt.Errorf("--verdict must be PASS or FAIL")
+	}
+	enableEvalOutput := s.Config.General.EnableEvalOutput
+	if enableEvalOutput && in.EvalReport == "" {
+		return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state when enable_eval_output is true")
+	}
+	if !enableEvalOutput && in.EvalReport != "" {
+		fmt.Fprintf(os.Stderr, "warning: ignoring --eval-report: eval output is not enabled\n")
+	}
+	if in.EvalReport != "" {
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
+	}
+
+	re.Evals = append(re.Evals, EvalRecord{
+		Round:      re.Round,
+		Verdict:    in.Verdict,
+		EvalReport: in.EvalReport,
+	})
+
+	cfg := s.Config.ReverseEngineering.Reconcile
+	forced := in.Verdict == "FAIL" && re.Round >= cfg.MaxRounds
+	passed := in.Verdict == "PASS" && re.Round >= cfg.MinRounds
+
+	if passed || forced {
+		if cfg.ColleagueReview {
+			s.State = StateColleagueReview
+		} else {
+			s.State = StateReconcileAdvance
+		}
+	} else {
+		// Loop back: increment round, return to RECONCILE.
+		re.Round++
+		s.State = StateReconcile
 	}
 
 	return nil

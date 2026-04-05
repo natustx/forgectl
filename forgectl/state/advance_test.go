@@ -2971,6 +2971,33 @@ func TestReverseEngineeringExecuteSubprocessFailureOutputsStop(t *testing.T) {
 
 // TestReverseEngineeringExecuteWorksFromAnyDir verifies that EXECUTE uses absolute paths
 // so it works correctly regardless of the current working directory.
+// TestReverseEngineeringReconcileAdvancesToReconcileEval verifies that advancing from RECONCILE
+// transitions to RECONCILE_EVAL with no other state mutation.
+func TestReverseEngineeringReconcileAdvancesToReconcileEval(t *testing.T) {
+	s := &ForgeState{
+		Phase: PhaseReverseEngineering,
+		State: StateReconcile,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 1
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileEval {
+		t.Errorf("state = %s, want RECONCILE_EVAL", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain mutated, want 0, got %d", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round mutated, want 1, got %d", s.ReverseEngineering.Round)
+	}
+}
+
 func TestReverseEngineeringExecuteWorksFromAnyDir(t *testing.T) {
 	dir := t.TempDir()
 	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
@@ -3004,5 +3031,345 @@ func TestReverseEngineeringExecuteWorksFromAnyDir(t *testing.T) {
 	}
 	if s.ReverseEngineering.ExecuteFile != capturedPath {
 		t.Errorf("state.execute_file = %q, want %q", s.ReverseEngineering.ExecuteFile, capturedPath)
+	}
+}
+
+// setupREReconcileEvalState returns a state in RECONCILE_EVAL with the given round and config.
+func setupREReconcileEvalState(round, minRounds, maxRounds int, colleagueReview bool) *ForgeState {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileEval,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.Round = round
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.Config.ReverseEngineering.Reconcile.MinRounds = minRounds
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = maxRounds
+	s.Config.ReverseEngineering.Reconcile.ColleagueReview = colleagueReview
+	return s
+}
+
+// TestREReconcileEvalPassBelowMinLoopsBack verifies PASS before min_rounds loops back to RECONCILE
+// and increments round.
+func TestREReconcileEvalPassBelowMinLoopsBack(t *testing.T) {
+	s := setupREReconcileEvalState(1, 2, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round = %d, want 2", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileEvalFailBelowMaxLoopsBack verifies FAIL before max_rounds loops back to RECONCILE
+// and increments round.
+func TestREReconcileEvalFailBelowMaxLoopsBack(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round = %d, want 2", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileEvalPassAtMinNoColleagueAdvancesToReconcileAdvance verifies PASS at min_rounds
+// without colleague_review advances to RECONCILE_ADVANCE.
+func TestREReconcileEvalPassAtMinNoColleagueAdvancesToReconcileAdvance(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+}
+
+// TestREReconcileEvalPassAtMinWithColleagueAdvancesToColleagueReview verifies PASS at min_rounds
+// with colleague_review enabled advances to COLLEAGUE_REVIEW.
+func TestREReconcileEvalPassAtMinWithColleagueAdvancesToColleagueReview(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, true)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateColleagueReview {
+		t.Errorf("state = %s, want COLLEAGUE_REVIEW", s.State)
+	}
+}
+
+// TestREReconcileEvalFailAtMaxNoColleagueAdvancesToReconcileAdvance verifies FAIL at max_rounds
+// without colleague_review advances to RECONCILE_ADVANCE (force-advance).
+func TestREReconcileEvalFailAtMaxNoColleagueAdvancesToReconcileAdvance(t *testing.T) {
+	s := setupREReconcileEvalState(3, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+}
+
+// TestREReconcileEvalMissingVerdictReturnsError verifies that advancing without --verdict
+// returns an error and state does not change.
+func TestREReconcileEvalMissingVerdictReturnsError(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Fatal("expected error for missing verdict")
+	}
+	if !strings.Contains(err.Error(), "--verdict") {
+		t.Errorf("expected '--verdict' in error, got: %v", err)
+	}
+	if s.State != StateReconcileEval {
+		t.Errorf("state should stay RECONCILE_EVAL, got %s", s.State)
+	}
+}
+
+// TestREColleagueReviewAdvancesToReconcileAdvance verifies that advancing from COLLEAGUE_REVIEW
+// always transitions to RECONCILE_ADVANCE with no other state mutation.
+func TestREColleagueReviewAdvancesToReconcileAdvance(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateColleagueReview,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.Round = 2
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round mutated, want 2, got %d", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileAdvanceMoreDomainsGoesToReconcile verifies that when more domains remain,
+// RECONCILE_ADVANCE increments reconcile_domain, resets round to 1, clears evals, and
+// returns to RECONCILE.
+func TestREReconcileAdvanceMoreDomainsGoesToReconcile(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api", "billing"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 2
+	s.ReverseEngineering.Evals = []EvalRecord{{Round: 1, Verdict: "PASS"}}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 1 {
+		t.Errorf("reconcile_domain = %d, want 1", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round = %d, want 1 (reset)", s.ReverseEngineering.Round)
+	}
+	if len(s.ReverseEngineering.Evals) != 0 {
+		t.Errorf("evals not cleared, got %d entries", len(s.ReverseEngineering.Evals))
+	}
+}
+
+// TestREReconcileAdvanceLastDomainGoesToDone verifies that when on the last domain,
+// RECONCILE_ADVANCE transitions to DONE.
+func TestREReconcileAdvanceLastDomainGoesToDone(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateDone {
+		t.Errorf("state = %s, want DONE", s.State)
+	}
+}
+
+// TestREReconcileAdvanceSingleDomainGoesToDone verifies the edge case where total_domains == 1:
+// RECONCILE_ADVANCE transitions immediately to DONE without any domain increment.
+func TestREReconcileAdvanceSingleDomainGoesToDone(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"only-domain"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0 // only domain
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateDone {
+		t.Errorf("state = %s, want DONE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain should not change for single domain, got %d", s.ReverseEngineering.ReconcileDomain)
+	}
+}
+
+// makeRELogger creates a Logger writing to a temp file and a readEntries helper.
+func makeRELogger(t *testing.T) (*Logger, func() []LogEntry) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.jsonl")
+	logger := &Logger{enabled: true, path: path}
+	read := func() []LogEntry {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var entries []LogEntry
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			var e LogEntry
+			if json.Unmarshal([]byte(line), &e) == nil {
+				entries = append(entries, e)
+			}
+		}
+		return entries
+	}
+	return logger, read
+}
+
+// TestRELoggingDomainStateContext verifies that advance in reverse_engineering phase produces
+// a JSONL log entry containing domain, domain_index, and total_domains.
+func TestRELoggingDomainStateContext(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateOrient,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api", "billing"}, false),
+	}
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["domain"] != "api" {
+		t.Errorf("detail.domain = %v, want api", e.Detail["domain"])
+	}
+	if e.Detail["domain_index"] != float64(0) {
+		t.Errorf("detail.domain_index = %v, want 0", e.Detail["domain_index"])
+	}
+	if e.Detail["total_domains"] != float64(2) {
+		t.Errorf("detail.total_domains = %v, want 2", e.Detail["total_domains"])
+	}
+}
+
+// TestRELoggingExecuteIncludesModeAndSpecCount verifies that an EXECUTE state advance log entry
+// includes mode and spec_count in the detail.
+func TestRELoggingExecuteIncludesModeAndSpecCount(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{
+		makeRESpec("spec-a", "api"),
+		makeRESpec("spec-b", "api"),
+		makeRESpec("spec-c", "billing"),
+	}
+	s := setupREExecuteState(t, dir, specs, "self_refine")
+	defer withSuccessRunner(t)()
+
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["mode"] != "self_refine" {
+		t.Errorf("detail.mode = %v, want self_refine", e.Detail["mode"])
+	}
+	if e.Detail["spec_count"] != float64(3) {
+		t.Errorf("detail.spec_count = %v, want 3", e.Detail["spec_count"])
+	}
+}
+
+// TestRELoggingReconcileEvalIncludesRoundAndVerdict verifies that a RECONCILE_EVAL advance log
+// entry includes round and verdict.
+func TestRELoggingReconcileEvalIncludesRoundAndVerdict(t *testing.T) {
+	s := setupREReconcileEvalState(2, 1, 3, false)
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["round"] != float64(2) {
+		t.Errorf("detail.round = %v, want 2", e.Detail["round"])
+	}
+	if e.Detail["verdict"] != "PASS" {
+		t.Errorf("detail.verdict = %v, want PASS", e.Detail["verdict"])
+	}
+}
+
+// TestREReconcileEvalRecordsEval verifies that each advance appends an EvalRecord with the correct
+// round and verdict.
+func TestREReconcileEvalRecordsEval(t *testing.T) {
+	s := setupREReconcileEvalState(1, 2, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if len(s.ReverseEngineering.Evals) != 1 {
+		t.Fatalf("evals = %d, want 1", len(s.ReverseEngineering.Evals))
+	}
+	if s.ReverseEngineering.Evals[0].Round != 1 {
+		t.Errorf("eval round = %d, want 1", s.ReverseEngineering.Evals[0].Round)
+	}
+	if s.ReverseEngineering.Evals[0].Verdict != "FAIL" {
+		t.Errorf("eval verdict = %q, want FAIL", s.ReverseEngineering.Evals[0].Verdict)
 	}
 }

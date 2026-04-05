@@ -630,6 +630,9 @@ type ForgeState struct {
 	Planning              *PlanningState              `json:"planning"`
 	Implementing          *ImplementingState          `json:"implementing"`
 	ReverseEngineering    *ReverseEngineeringState    `json:"reverse_engineering,omitempty"`
+	// Logger is a transient, non-serialized activity logger attached at the cmd layer.
+	// When nil, all log writes are no-ops.
+	Logger                *Logger                     `json:"-"`
 }
 
 // AdvanceInput carries flags from the advance command.
