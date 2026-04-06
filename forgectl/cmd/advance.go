@@ -138,20 +138,20 @@ func buildAdvanceDetail(in state.AdvanceInput) map[string]interface{} {
 }
 
 // isTerminalState returns true when the session has reached a terminal point
-// that warrants archiving.
+// that warrants archiving. Uses state.IsTerminal for terminal detection, then
+// applies archiving-specific guards (e.g. StartedAtPhase check).
 func isTerminalState(s *state.ForgeState) bool {
-	// Implementing phase complete.
-	if s.Phase == state.PhaseImplementing && s.State == state.StateDone {
-		return true
+	if !state.IsTerminal(s) {
+		return false
 	}
-	// Specifying phase complete (phase shifting to planning, started at specifying).
+	// Archiving guard: only archive specifying sessions that started at specifying.
 	if s.State == state.StatePhaseShift &&
 		s.PhaseShift != nil &&
 		s.PhaseShift.From == state.PhaseSpecifying &&
-		s.StartedAtPhase == state.PhaseSpecifying {
-		return true
+		s.StartedAtPhase != state.PhaseSpecifying {
+		return false
 	}
-	return false
+	return true
 }
 
 // sessionDomain returns the domain name for archive file naming.
