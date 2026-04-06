@@ -1,3 +1,12 @@
+---
+name: forgectl-implementation-planning
+description: >-
+  Generates a validated plan.json and companion notes using the forgectl planning phase. Studies
+  specs and the codebase, drafts a layered dependency-ordered implementation DAG with acceptance
+  criteria, then iterates through evaluation rounds. Use when you have accepted specs and need to
+  produce an implementation plan, create plan.json, or run the forgectl planning phase.
+---
+
 <role>
 You are a professional Staff Engineer.
 

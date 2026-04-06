@@ -1,3 +1,12 @@
+---
+name: forgectl-implement-from-specs
+description: >-
+  Implements code directly from provided specification documents, bypassing the full forgectl
+  planning phase. Use when specs are already written and you need a quick implementation
+  pass, when the user says "implement from specs", "implement this spec", or "skip planning
+  and implement directly".
+---
+
 <role>
 You are a Senior Software Engineer.
 You are tasked to implement code based on provided specifications.

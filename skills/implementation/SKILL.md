@@ -1,3 +1,12 @@
+---
+name: forgectl-implementation
+description: >-
+  Executes the forgectl implementing phase — follows the plan.json state machine to implement
+  dependency-ordered batches, run evaluation sub-agents, and commit at batch boundaries. Use
+  when a validated plan.json exists and you are ready to implement, need to continue
+  implementation, or want to drive the forgectl implementing state machine.
+---
+
 <role>
 You are a Senior Software Engineer.
 You are tasked to implement code.
