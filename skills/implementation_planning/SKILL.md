@@ -35,8 +35,10 @@ Prepare a plan queue JSON file listing every implementation plan to produce in t
 See: [references/plan-queue-format.md](references/plan-queue-format.md)
 
 ```bash
-forgectl init --phase planning --from <plan-queue.json> --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase planning --from <plan-queue.json>
 ```
+
+Batch size, round limits, and guided mode come from `.forgectl/config`.
 
 This creates `forgectl-state.json` and sets the state to ORIENT.
 
@@ -52,8 +54,8 @@ For each plan in the queue, follow the forgectl state machine:
 1b. **STUDY_SPECS** — Study every spec listed in the plan's `specs` field. Read full spec files and review git diffs for recent spec commits.
 1c. **STUDY_CODE** — Explore the codebase using sub-agents (3 agents) within the plan's `code_search_roots`. Partition agents by concern (e.g. agent 1: infrastructure/config/entry points, agent 2: domain models/state, agent 3: transport/IO/tests). Identify existing implementations, TODOs, placeholders, and patterns.
 1d. **STUDY_PACKAGES** — Study the project's technical stack: package manifests, library docs, CLAUDE.md references.
-1e. **REVIEW** — Checkpoint before drafting. Read the plan format reference BEFORE drafting: [references/plan-format.json](references/plan-format.json). If guided, discuss with the user.
-1f. **DRAFT** — Generate the implementation plan as `plan.json` + `notes/` at the target path. Follow the schema in [references/plan-format.json](references/plan-format.json) exactly. Forgectl validates automatically on advance. See [Schema Gotchas](#schema-gotchas) below.
+1e. **REVIEW** — Checkpoint before drafting. Read the plan format reference BEFORE drafting: `forgectl/PLAN_FORMAT.md`. If guided, discuss with the user.
+1f. **DRAFT** — Generate the implementation plan as `plan.json` + `notes/` at the target path. Follow `forgectl/PLAN_FORMAT.md` and the companion schema in [references/plan-format.json](references/plan-format.json). Forgectl validates automatically on advance. See [Schema Gotchas](#schema-gotchas) below.
 1g. **EVALUATE** — Use `forgectl eval` to get evaluation context. Spawn an Opus sub-agent to assess the plan against all 11 dimensions. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`.
 1h. **REFINE** — If evaluation failed or min rounds not met, spawn a sub-agent to update the plan and notes. Advance to re-evaluate.
 1i. **ACCEPT** — Plan finalized. `forgectl advance --message <commit msg>`.
@@ -62,7 +64,7 @@ Use `forgectl status` at any point to see current state and what action is neede
 
 See: [references/planning-navigation.md](references/planning-navigation.md)
 
-The plan output format is defined in [references/plan-format.json](references/plan-format.json).
+The plan output format is defined in `forgectl/PLAN_FORMAT.md`, with a schema-shaped companion in [references/plan-format.json](references/plan-format.json).
 </step_1>
 
 <step_2>
@@ -96,7 +98,7 @@ forgectl advance
 Plans are written to the path specified in the plan queue's `file` field:
 
 ```
-<domain>/.workspace/implementation_plan/
+<domain>/.forge_workspace/implementation_plan/
 ├── plan.json          # The implementation plan manifest
 └── notes/             # Reference notes per package
     ├── <package>.md
@@ -135,7 +137,7 @@ The planning evaluator assesses 11 dimensions against the referenced specs:
 
 Full evaluator instructions: `~/.local/bin/evaluators/plan-eval.md` (read by `forgectl eval` automatically)
 
-Eval reports are written to: `<domain>/.workspace/implementation_plan/evals/round-N.md`
+Eval reports are written to: `<domain>/.forge_workspace/implementation_plan/evals/round-N.md`
 
 ### Evaluation Sub-Agent Context
 

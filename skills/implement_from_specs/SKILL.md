@@ -57,7 +57,7 @@ See: [{domain}/.workspace/implement-from-specs/references/subagent-usage.md](ref
 **Record**
 
 3a. When tests pass, add a log entry to `{domain}/.workspace/implement-from-specs/IMPLEMENTATION_LOG.md`.
-3b. Stage and commit: `git add -A && git commit -m "<descriptive message>"`
+3b. Do NOT run `git add` or `git commit`. The user manages all commits.
 
 See: [{domain}/.workspace/implement-from-specs/references/git-commit-guidelines.md](references/git-commit-guidelines.md)
 See: [Log format reference](references/implementation-log-format.md)

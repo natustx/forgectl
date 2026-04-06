@@ -209,4 +209,5 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
 - Type definitions: `forgectl/state/types.go` (`PlanJSON`, `PlanItem`, `PlanLayerDef`, `PlanRef`, `PlanTest`)
 - Validation: `forgectl/state/validate.go` (`ValidatePlanJSON`)
 - Phase mutation: `forgectl/state/advance.go` (`advancePhaseShift`)
-- Authoritative reference: `skills/implementation_planning/references/plan-format.json`
+- Human-readable format: `forgectl/PLAN_FORMAT.md`
+- Companion schema-shaped reference: `skills/implementation_planning/references/plan-format.json`

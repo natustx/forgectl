@@ -68,7 +68,7 @@ forgectl advance
 
 ### REVIEW
 
-Checkpoint before drafting. Review study findings and the plan format reference (`forgectl/docs/PLAN_FORMAT.md`). When guided mode is on, stop and discuss with the user before continuing.
+Checkpoint before drafting. Review study findings and the plan format reference (`forgectl/PLAN_FORMAT.md`). When guided mode is on, stop and discuss with the user before continuing.
 
 ```bash
 forgectl advance
@@ -79,7 +79,8 @@ forgectl advance
 Generate the implementation plan:
 - Write `plan.json` following the schema in `references/plan-format.json` (the authoritative schema derived from forgectl's Go types)
 - Write `notes/<package>.md` files for implementation guidance
-- Output location: `<domain>/.workspace/implementation_plan/`
+- Output location: `<domain>/.forge_workspace/implementation_plan/`
+- Cross-check against `forgectl/PLAN_FORMAT.md` for the human-readable format contract
 
 When you advance, forgectl automatically validates `plan.json`. If valid, you go straight to EVALUATE. If invalid, you enter VALIDATE. See VALIDATE section below for common failures.
 
@@ -118,7 +119,7 @@ forgectl advance --verdict PASS --eval-report <path>
 forgectl advance --verdict FAIL --eval-report <path>
 ```
 
-Eval reports are written to: `<domain>/.workspace/implementation_plan/evals/round-N.md`
+Eval reports are written to: `<domain>/.forge_workspace/implementation_plan/evals/round-N.md`
 
 ### REFINE
 
@@ -144,7 +145,7 @@ This transitions to PHASE_SHIFT (planning → implementing).
 
 ```bash
 # Initialize planning session
-forgectl init --phase planning --from plan-queue.json --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase planning --from plan-queue.json
 
 # See current state and what to do next
 forgectl status
@@ -197,3 +198,5 @@ No `--from` flag needed — the plan path is already known from the planning ses
 ```bash
 forgectl advance
 ```
+
+These values come from `.forgectl/config`, not CLI flags.

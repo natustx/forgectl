@@ -35,8 +35,8 @@ The spec generation process is managed by the `forgectl` CLI tool that tracks st
 ### Quick Reference
 
 ```bash
-# Initialize session — validate queue, set rounds
-forgectl init --min-rounds 1 --max-rounds 3 --batch-size 1 --from queue.json --guided
+# Initialize session from a validated spec queue
+forgectl init --phase specifying --from queue.json
 
 # Full session overview
 forgectl status
@@ -75,7 +75,7 @@ INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → REVIEW → ACCE
                                                          └─────────┘ (grant extra round)
 ```
 
-- **INIT**: Create state file from validated queue. Set `--min-rounds`, `--max-rounds`, `--batch-size`, `--guided`.
+- **INIT**: Create state file from validated queue. Effective batch size, round limits, and guided mode come from `.forgectl/config`.
 - **ORIENT**: Architect reads plans and existing specs. Builds mental model.
 - **SELECT**: Pull next topic from queue. If `--guided`, discuss with user.
 - **DRAFT**: Write the spec file. Optionally override path with `--file`.

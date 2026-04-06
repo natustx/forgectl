@@ -47,8 +47,10 @@ See: [references/search-specs-for-specifying.md](references/search-specs-for-spe
 Feed the spec queue JSON to forgectl:
 
 ```bash
-forgectl init --phase specifying --from <spec-queue.json> --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase specifying --from <spec-queue.json>
 ```
+
+Batch size, round limits, and guided mode come from `.forgectl/config`.
 
 This creates `forgectl-state.json` and sets the state to ORIENT.
 
@@ -80,7 +82,7 @@ See: [references/spec-format.md](references/spec-format.md)
 
 After all individual specs are accepted, forgectl enters reconciliation:
 
-3a. **RECONCILE** — Fix cross-references across all specs. Verify dependency symmetry, naming consistency, and scope boundaries. Stage the changes.
+3a. **RECONCILE** — Fix cross-references across all specs. Verify dependency symmetry, naming consistency, and scope boundaries.
 3b. **RECONCILE_EVAL** — Spawn a sub-agent to evaluate cross-spec consistency from `git diff --staged`.
 3c. **RECONCILE_REVIEW** — Human reviews the reconciliation eval. Accept or grant another pass.
 

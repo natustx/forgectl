@@ -184,7 +184,7 @@ The `--from` file for `forgectl init --phase specifying`. This is the same schem
 
 | Command | What it does |
 |---------|-------------|
-| `forgectl init --from <file> --batch-size <n> --max-rounds <n>` | Creates the state file from a spec queue. |
+| `forgectl init --phase specifying --from <file>` | Creates the state file from a spec queue. |
 | `forgectl advance` | Transitions to the next state. Flags vary by current state. |
 | `forgectl advance --verdict PASS --eval-report <path> --message "msg"` | Accept an evaluation (EVALUATE state). |
 | `forgectl advance --verdict FAIL --eval-report <path>` | Fail an evaluation → REFINE. |

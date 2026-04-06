@@ -8,7 +8,7 @@ You are making cross-cutting changes to a set of interconnected specification do
 
 Please spawn multiple subagents to help in this matter,  on a good order 1 sub agents per 4 spec files.
 
-**Step 3 — Commit.** Stage all affected files and commit with a message that explains the intent of the change.
+**Step 3 — Record.** Note what files were changed and why. Do NOT run `git add` or `git commit` — the user manages all commits.
 
 **Step 4 — Self-review.** Re-read every modified specification end-to-end. Use [spec-format.md](spec-format.md) as the structural reference for what a well-formed spec looks like. Check specifically for:
 - References to removed or relocated specifications
@@ -19,4 +19,4 @@ Please spawn multiple subagents to help in this matter,  on a good order 1 sub a
 - Depends On entries that reference specs that no longer exist
 - Integration Points that are no longer symmetric (see spec-format.md § Integration Points)
 
-**Step 5 — Fix and commit separately.** Address all findings from the review in a distinct commit.
+**Step 5 — Fix.** Address all findings from the review. Do NOT commit — the user manages all commits.

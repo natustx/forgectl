@@ -6,7 +6,7 @@
     "PATH RESOLUTION:",
     "  All paths in 'refs[].path' and 'items[].ref' are resolved relative to",
     "  the directory containing plan.json (filepath.Dir(plan.json)).",
-    "  Example: if plan.json is at api/.workspace/implementation_plan/plan.json,",
+    "  Example: if plan.json is at api/.forge_workspace/implementation_plan/plan.json,",
     "  then ref path '../../specs/foo.md' resolves to api/specs/foo.md.",
     "",
     "  Paths MUST NOT contain '#anchor' fragments — forgectl runs os.Stat()",

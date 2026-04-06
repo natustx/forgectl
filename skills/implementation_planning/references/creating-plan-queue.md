@@ -42,25 +42,25 @@ Split specs across agents (2–3 specs per agent) for parallel processing.
 
 ## Step 4 — Draft Each Plan Entry
 
-For each domain, fill in the 6 required fields:
+For each domain, fill in the required fields:
 
 | Field | How to determine |
 |---|---|
 | `name` | `<Domain> <Initiative Name>` (e.g., "API Centralized Logging") |
 | `domain` | The domain directory name (e.g., `api`) |
-| `topic` | One sentence summarizing the implementation scope, derived from the spec research |
-| `file` | `<domain>/.workspace/implementation_plan/plan.json` |
+| `file` | `<domain>/.forge_workspace/implementation_plan/plan.json` |
 | `specs` | All staged spec paths for this domain |
+| `spec_commits` | Deduplicated commit hashes registered against the listed specs; use `[]` if none are available |
 | `code_search_roots` | The domain's source directory (e.g., `["api/"]`); add cross-domain roots if specs reference shared code |
 
 ---
 
 ## Step 5 — Write the File
 
-Place the file at `.workspace/plan-queue.json`. Validate with:
+Place the file wherever convenient, for example `plan-queue.json` at the project root. Validate with:
 
 ```bash
-python3 -c "import json; d = json.load(open('.workspace/plan-queue.json')); print(f'{len(d[\"plans\"])} plans')"
+python3 -c "import json; d = json.load(open('plan-queue.json')); print(f'{len(d[\"plans\"])} plans')"
 ```
 
 Forgectl also validates strictly on `init` — if any field is missing or extra fields are present, it exits with an error and prints the expected schema.
@@ -70,21 +70,13 @@ Forgectl also validates strictly on `init` — if any field is missing or extra 
 ## Step 6 — Initialize Forgectl
 
 ```bash
-forgectl init --phase planning \
-  --from .workspace/plan-queue.json \
-  --batch-size 1 \
-  --max-rounds 3 \
-  --min-rounds 1 \
-  --guided
+forgectl init --phase planning --from plan-queue.json
 ```
 
 | Flag | Purpose |
 |---|---|
 | `--from` | Path to the plan queue file |
-| `--batch-size` | How many plans to process concurrently (1 = sequential) |
-| `--max-rounds` | Maximum evaluate/refine cycles per plan |
-| `--min-rounds` | Minimum evaluate/refine cycles before a plan can be accepted |
-| `--guided` | Pause at REVIEW for user discussion before drafting |
+| `--phase planning` | Start the planning phase explicitly |
 
 After init, use `forgectl status` to see the session overview and `forgectl advance` to begin processing.
 
@@ -92,7 +84,7 @@ After init, use `forgectl status` to see the session overview and `forgectl adva
 
 ## Tips
 
-- **New vs modified specs**: Identify which specs are new (core initiative work) vs modified (integration changes). This helps write a better `topic`.
-- **Topic quality matters**: The topic orients the entire planning phase. It should capture the "what and why" in one sentence.
+- **New vs modified specs**: Identify which specs are new (core initiative work) vs modified (integration changes). This helps write a better plan `name` and pick better `code_search_roots`.
+- **Commit coverage matters**: `spec_commits` helps the planner inspect the exact spec diffs that drove the queue entry.
 - **Code search roots**: Typically just the domain directory. Add additional roots only if specs explicitly reference cross-domain code (e.g., a shared `lib/` directory).
 - **Review before init**: Present each plan entry to the user for approval before writing. The plan queue is hard to change after `forgectl init`.

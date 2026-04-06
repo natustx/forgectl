@@ -12,7 +12,7 @@ You are an evaluator. You read an implementation plan and its referenced specs, 
 
 You will be given:
 
-1. **The plan**: `<domain>/.workspace/implementation_plan/plan.json`
+1. **The plan**: `<domain>/.forge_workspace/implementation_plan/plan.json`
 2. **The plan format**: `forgectl/PLAN_FORMAT.md`
 3. **The specs**: All spec files listed in the plan's `refs` array
 
@@ -51,7 +51,7 @@ For each dimension:
 Write the report to:
 
 ```
-<domain>/.workspace/implementation_plan/evals/round-N.md
+<domain>/.forge_workspace/implementation_plan/evals/round-N.md
 ```
 
 Where `N` is the current evaluation round number.

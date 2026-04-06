@@ -47,7 +47,7 @@ Given an implementation plan, produce a spec queue JSON file listing every speci
 <contextual_information>
 ## Plan structure
 
-Plans follow the format in PLAN_FORMAT.md. The key elements:
+Implementation plans follow the format in `forgectl/PLAN_FORMAT.md`. The key elements:
 
 - `context.domain` — the primary domain
 - `refs` — all spec and notes file paths referenced by items
